@@ -12,10 +12,10 @@
     # - Credito usado: 4 bytes                                  (Offset 80)
     # - Status ativo: 4 bytes (0=inativo, 1=ativo)              (Offset 84)
     # - Padding: 38 bytes (para alinhar em 128)                 (Offset 88)
-    
+
     clientes: .space 6400 #50 clientes para 128 bytes cada;
     num_clientes: .word 0 #contador de clientes ativos
-    
+
     # Buffers de conta e arquivo: #
     buffer_comando: .space 256
     buffer_cpf: .space 12
@@ -31,18 +31,18 @@
     # Constantes globais
     limite_credito_padrao: .word 150000 # R$1500,00
     max_clientes: .word 50
-    
+
     # Estrutura para extrato de debito
     # Cada transacao ocupara 20 bytes:	
     # Offset 0: Conta (8 bytes) - A conta (com digito verificador) a quem pertence a transacao.
     # Offset 8: Valor (4 bytes) - Em centavos (positivo para entrada, negativo para saida).
     # Offset 12: Tipo (4 bytes) - (ex: 1=Deposito, 2=Saque, 3=Transf. Debito).
     # Offset 16: Data/Hora (4 bytes) - (Reservado para Fase 4 - Henrique).
-    
+
     transacoes_debito: .space 20000      # 1000 transacoes * 20 bytes cada
     num_transacoes_debito: .word 0
     max_transacoes_debito: .word 1000
-    
+
     #####  Mensagens do sistema #####
     msg_sucesso_cadastro: .asciiz "\nCliente cadastrado com sucesso. Numero da conta "
     msg_cpf_duplicado: .asciiz "\nJa existe conta neste CPF\n"
@@ -58,7 +58,7 @@
     msg_str_rs: .asciiz "R$" 
     msg_str_virgula: .asciiz ","
 
-    # Strings para impressão em conta_buscar
+    # Strings para impressï¿½o em conta_buscar
     msg_str_cpf: .asciiz "\nCPF: "
     msg_str_conta: .asciiz "\nConta: "
     msg_str_nome: .asciiz "\nNome: "
@@ -70,19 +70,19 @@
     msg_saque_sucesso: .asciiz "\nSaque realizado com sucesso\n"
     msg_saldo_insuficiente: .asciiz "\nFalha: saldo insuficente\n"
     msg_cliente_inexistente: .asciiz "\nFalha: cliente inexistente\n"
-    
+
     msg_extrato_cabecalho: .asciiz "\nExtrato da conta "
     msg_extrato_tipo1: .asciiz "\nTipo: Deposito"
     msg_extrato_tipo2: .asciiz "\nTipo: Saque"
     msg_extrato_tipo3: .asciiz "\nTipo: Transferencia"
     msg_extrato_valor: .asciiz " | Valor: "
-    
+
     msg_em_construcao: .asciiz "\nEm construcao...\n"
-    
-    # Nome do arquivo # ainda não implementado, sujeito a mucanças
+
+    # Nome do arquivo # ainda nï¿½o implementado, sujeito a mucanï¿½as
     arquivo_nome: .asciiz "pingasbank_data.txt"
-    
-    # Delimitadores # (Mantidos mas funções comentadas)
+
+    # Delimitadores # (Mantidos mas funï¿½ï¿½es comentadas)
     virgula: .asciiz ","
     ponto_virgula: .asciiz ";"
     abre_parentese: .asciiz "("
@@ -90,13 +90,13 @@
     fecha_chave: .asciiz "}"
     fecha_parentese: .asciiz ")"
     underscore: .asciiz "_"
-    
-    
+
+
     # Menu Principal - CLI #
     prompt_cli: .asciiz "\nPingasBank> "
     goodbye: .asciiz "\nEncerrando o programa, ate mais!\n"
 
-    # Nomes dos Comandos para Comparação #
+    # Nomes dos Comandos para Comparaï¿½ï¿½o #
     str_conta_cadastrar: .asciiz "conta_cadastrar"
     str_conta_format: .asciiz "conta_format"
     str_conta_fechar: .asciiz "conta_fechar"
@@ -123,154 +123,154 @@ main:
     # Salva o ponteiro para os argumentos em $s1
     addi $sp, $sp, -4
     sw $s1, 0($sp)
-    
-    cli_loop:
-        # Mostrar o prompt
-        li $v0, 4
-        la $a0, prompt_cli
-        syscall
-        
-        # Ler o comando inteiro do usuário
-        li $v0, 8
-        la $a0, buffer_comando
-        li $a1, 256
-        syscall
-        
-        # Limpar o newline do comando
-        la $a0, buffer_comando
-        jal limpar_newline_comando
-        
-        # Parsear o COMANDO (a parte antes do primeiro '-')
-        la $a0, buffer_temp        # Destino
-        li $a1, '-'                # Delimitador
-        la $a2, buffer_comando     # Fonte
-        jal parse_campo
-        move $s1, $v0              # Salva o ponteiro para o RESTO (argumentos) em $s1
-        
-        # -- Início do Bloco de Comparação de Comandos --
-        
-        la $a0, buffer_temp
-        la $a1, str_conta_cadastrar
-        jal strcmp
-        beqz $v0, handle_conta_cadastrar
-        
-        la $a0, buffer_temp
-        la $a1, str_conta_buscar
-        jal strcmp
-        beqz $v0, handle_conta_buscar 
-        
-        la $a0, buffer_temp
-        la $a1, str_encerrar
-        jal strcmp
-        beqz $v0, handle_encerrar
 
-        # --- Comandos "Em Construção" --- #
-        
-        la $a0, buffer_temp
-        la $a1, str_conta_format
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_conta_fechar
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_debito_extrato
-        jal strcmp
-        beqz $v0, handle_debito_extrato
-        
-        la $a0, buffer_temp
-        la $a1, str_credito_extrato
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_transferir_debito
-        jal strcmp
-        beqz $v0, handle_transferir_debito
-        
-        la $a0, buffer_temp
-        la $a1, str_transferir_credito
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_pagar_fatura
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_sacar
-        jal strcmp
-        beqz $v0, handle_sacar
-        
-        la $a0, buffer_temp
-        la $a1, str_depositar
-        jal strcmp
-        beqz $v0, handle_depositar
-        
-        la $a0, buffer_temp
-        la $a1, str_alterar_limite
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_data_hora
-        jal strcmp
-        beqz $v0, handle_em_construcao
-        
-        la $a0, buffer_temp
-        la $a1, str_salvar
-        jal strcmp
-        beqz $v0, handle_em_construcao 
-        
-        la $a0, buffer_temp
-        la $a1, str_recarregar
-        jal strcmp
-        beqz $v0, handle_em_construcao 
-        
-        la $a0, buffer_temp
-        la $a1, str_formatar
-        jal strcmp
-        beqz $v0, handle_em_construcao 
-        
-        # --- Fim dos Comandos ---
-        
-        # Se chegou aqui, o comando é inválido
-        li $v0, 4
-        la $a0, msg_comando_invalido
-        syscall
-        j cli_loop
+    cli_loop:
+    # Mostrar o prompt
+    li $v0, 4
+    la $a0, prompt_cli
+    syscall
+
+    # Ler o comando inteiro do usuï¿½rio
+    li $v0, 8
+    la $a0, buffer_comando
+    li $a1, 256
+    syscall
+
+    # Limpar o newline do comando
+    la $a0, buffer_comando
+    jal limpar_newline_comando
+
+    # Parsear o COMANDO (a parte antes do primeiro '-')
+    la $a0, buffer_temp        # Destino
+    li $a1, '-'                # Delimitador
+    la $a2, buffer_comando     # Fonte
+    jal parse_campo
+    move $s1, $v0              # Salva o ponteiro para o RESTO (argumentos) em $s1
+
+    # -- Inï¿½cio do Bloco de Comparaï¿½ï¿½o de Comandos --
+
+    la $a0, buffer_temp
+    la $a1, str_conta_cadastrar
+    jal strcmp
+    beqz $v0, handle_conta_cadastrar
+
+    la $a0, buffer_temp
+    la $a1, str_conta_buscar
+    jal strcmp
+    beqz $v0, handle_conta_buscar 
+
+    la $a0, buffer_temp
+    la $a1, str_encerrar
+    jal strcmp
+    beqz $v0, handle_encerrar
+
+    # --- Comandos "Em Construï¿½ï¿½o" --- #
+
+    la $a0, buffer_temp
+    la $a1, str_conta_format
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_conta_fechar
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_debito_extrato
+    jal strcmp
+    beqz $v0, handle_debito_extrato
+
+    la $a0, buffer_temp
+    la $a1, str_credito_extrato
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_transferir_debito
+    jal strcmp
+    beqz $v0, handle_transferir_debito
+
+    la $a0, buffer_temp
+    la $a1, str_transferir_credito
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_pagar_fatura
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_sacar
+    jal strcmp
+    beqz $v0, handle_sacar
+
+    la $a0, buffer_temp
+    la $a1, str_depositar
+    jal strcmp
+    beqz $v0, handle_depositar
+
+    la $a0, buffer_temp
+    la $a1, str_alterar_limite
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_data_hora
+    jal strcmp
+    beqz $v0, handle_em_construcao
+
+    la $a0, buffer_temp
+    la $a1, str_salvar
+    jal strcmp
+    beqz $v0, handle_em_construcao 
+
+    la $a0, buffer_temp
+    la $a1, str_recarregar
+    jal strcmp
+    beqz $v0, handle_em_construcao 
+
+    la $a0, buffer_temp
+    la $a1, str_formatar
+    jal strcmp
+    beqz $v0, handle_em_construcao 
+
+    # --- Fim dos Comandos ---
+
+    # Se chegou aqui, o comando ï¿½ invï¿½lido
+    li $v0, 4
+    la $a0, msg_comando_invalido
+    syscall
+    j cli_loop
 
 # --- Handlers de Comandos ---
 
 handle_conta_cadastrar:
-    # $s1 já contém o ponteiro para os argumentos
-    
+    # $s1 jï¿½ contï¿½m o ponteiro para os argumentos
+
     # 1. Parsear CPF (arg1)
     la $a0, buffer_cpf
     li $a1, '-'
     move $a2, $s1
     jal parse_campo
     move $s1, $v0  # Atualiza ponteiro de argumentos
-    
+
     # 2. Parsear Conta (arg2)
     la $a0, buffer_conta
     li $a1, '-'
     move $a2, $s1
     jal parse_campo
     move $s1, $v0  # Atualiza ponteiro de argumentos
-    
-    # 3. Parsear Nome (arg3 - é o resto da string)
+
+    # 3. Parsear Nome (arg3 - ï¿½ o resto da string)
     la $a0, buffer_nome
     move $a1, $s1
     jal strcpy # Copia o resto da string
-    
-    # 4. Executar a lógica de cadastro
+
+    # 4. Executar a lï¿½gica de cadastro
     jal logica_cadastro_cliente
-    
+
     j cli_loop
 
 ##### NOVA FUNCAO Handler para conta_buscar #####
@@ -279,9 +279,9 @@ handle_conta_buscar:
     sw $ra, 0($sp)
     sw $s0, 4($sp) # Salvar $s0 (ponteiro do cliente)
 
-    # $s1 já contém o ponteiro para os argumentos (a conta XXXXXX-X)
+    # $s1 jï¿½ contï¿½m o ponteiro para os argumentos (a conta XXXXXX-X)
 
-    # 1. Copiar o argumento (conta) para um buffer temporário
+    # 1. Copiar o argumento (conta) para um buffer temporï¿½rio
     la $a0, buffer_temp # Destino
     move $a1, $s1        # Fonte (o resto da linha de comando)
     jal strcpy
@@ -320,7 +320,7 @@ handle_conta_buscar:
         li $v0, 4
         la $a0, hifen
         syscall
-        lb $a0, 0($t0) # Exibe o 7º caractere (DV)
+        lb $a0, 0($t0) # Exibe o 7ï¿½ caractere (DV)
         li $v0, 11
         syscall
 
@@ -336,21 +336,21 @@ handle_conta_buscar:
     la $a0, msg_str_saldo
     syscall
     lw $a0, 72($s0) # Offset 72 = Saldo
-    jal print_moeda # print_moeda já imprime newline no final
+    jal print_moeda # print_moeda jï¿½ imprime newline no final
 
-    # Limite de Crédito
+    # Limite de Crï¿½dito
     li $v0, 4
     la $a0, msg_str_limite
     syscall
     lw $a0, 76($s0) # Offset 76 = Limite
-    jal print_moeda # print_moeda já imprime newline no final
+    jal print_moeda # print_moeda jï¿½ imprime newline no final
 
-    # Crédito Usado
+    # Crï¿½dito Usado
     li $v0, 4
     la $a0, msg_str_credito_usado
     syscall
     lw $a0, 80($s0) # Offset 80 = Credito Usado
-    jal print_moeda # print_moeda já imprime newline no final
+    jal print_moeda # print_moeda jï¿½ imprime newline no final
 
     # Imprime um newline extra no final da consulta
     li $v0, 4
@@ -368,8 +368,7 @@ fim_handle_conta_buscar:
     lw $s0, 4($sp) # Restaurar $s0
     lw $ra, 0($sp)
     addi $sp, $sp, 8
-    # jr $ra  <-- ERRO AQUI: Retorna para o meio do handler, causando loop
-    j cli_loop # <-- CORREÇÃO: Deve saltar de volta para o loop principal
+    j cli_loop 
 
 handle_em_construcao:
     li $v0, 4
@@ -391,409 +390,410 @@ encerrar_programa:
 
     li $v0, 10
     syscall
-    
+    	
 registrar_transacao_debito:
-    addi $sp, $sp, -16      # Aloca 16 bytes na pilha (stack)
+    addi $sp, $sp, -16      # Aloca 16 bytes na pilha
     sw $ra, 12($sp)         # Salva o endereco de retorno ($ra) na pilha
-    sw $s0, 8($sp)          # Salva o registrador $s0 na pilha (preservado)
-    sw $s1, 4($sp)          # Salva o registrador $s1 na pilha (preservado)
-    sw $s2, 0($sp)          # Salva o registrador $s2 na pilha (preservado)
-    
-    # Argumentos: $a0=ponteiro_conta, $a1=valor, $a2=tipo
-    move $s0, $a0           # Guarda o ponteiro da conta (de $a0) em $s0
-    move $s1, $a1           # Guarda o valor (de $a1) em $s1
-    move $s2, $a2           # Guarda o tipo (de $a2) em $s2
-    
+    sw $s0, 8($sp)          # Salva o registrador $s0 na pilha
+    sw $s1, 4($sp)          # Salva o registrador $s1 na pilha
+    sw $s2, 0($sp)          # Salva o registrador $s2 na pilha
+
+    # Argumentos esperados: $a0=ponteiro_conta, $a1=valor, $a2=tipo
+    move $s0, $a0           # Guarda o ponteiro da conta em $s0
+    move $s1, $a1           # Guarda o valor em $s1
+    move $s2, $a2           # Guarda o tipo em $s2
+
     # Verifica se o limite de transacoes foi atingido
     la $t0, num_transacoes_debito       # Carrega o endereco do contador de transacoes
-    lw $t1, 0($t0)                  # Carrega o valor do contador (numero atual) em $t1
-    la $t2, max_transacoes_debito       # Carrega o endereco do limite maximo
+    lw $t1, 0($t0)                  # Carrega o valor atual do contador em $t1
+    la $t2, max_transacoes_debito       # Carrega o endereco do limite maximo de transacoes
     lw $t2, 0($t2)                  # Carrega o valor do limite maximo em $t2
-    bge $t1, $t2, fim_registrar_transacao # Se (num_transacoes >= max_transacoes), pula para o fim
-    
+    bge $t1, $t2, fim_registrar_transacao # Se contador >= limite, pula para o fim
+
     # Calcula o endereco do proximo slot vago no array
-    li $t3, 20                      # Carrega o tamanho da struct (20 bytes)
+    li $t3, 20                      # Carrega o tamanho de cada transacao (20 bytes)
     mul $t4, $t1, $t3               # Calcula o offset: $t4 = contador * 20
     la $t5, transacoes_debito       # Carrega o endereco base do array 'transacoes_debito'
     add $t5, $t5, $t4               # Calcula o endereco do slot: $t5 = base + offset
-    
-    # Salva os dados no slot vago ($t5)
-    
-    # Salva a string da conta 
+
+    # Salva os dados no slot vago (endereco em $t5)
+    # Salva a string da conta (no Offset 0 do slot)
     move $a0, $t5                   # $a0 = destino (ponteiro para o slot)
-    move $a1, $s0                   # $a1 = fonte (ponteiro para a conta em $s0)
-    jal strcpy                      # Chama a funcao para copiar a string
-    
-    # Salva o valor 
-    sw $s1, 8($t5)                  # Salva o valor (de $s1) no offset 8 do slot
-    
-    # Salva o tipo 
-    sw $s2, 12($t5)                 # Salva o tipo (de $s2) no offset 12 do slot
-    
-    # Salva a data/hora - inicializa com 0
-    sw $zero, 16($t5)               # Salva 0 no offset 16 (campo reservado)
-    
+    move $a1, $s0                   # $a1 = fonte (ponteiro da string da conta em $s0)
+    jal strcpy                      # Chama a funcao auxiliar para copiar a string
+
+    # Salva o valor (no Offset 8 do slot)
+    sw $s1, 8($t5)                  # Salva o valor (de $s1) no offset 8
+
+    # Salva o tipo (no Offset 12 do slot)
+    sw $s2, 12($t5)                 # Salva o tipo (de $s2) no offset 12
+
+    # Salva a data/hora (no Offset 16 do slot) - inicializa com 0
+    sw $zero, 16($t5)               # Salva 0 no offset 16 (campo reservado para data)
+
     # Incrementa o contador global de transacoes
     addi $t1, $t1, 1                # Incrementa o contador ($t1)
     sw $t1, 0($t0)                  # Salva o novo valor do contador na memoria
-    
+
 fim_registrar_transacao:
     # Restaura os registradores salvos da pilha
-    lw $s2, 0($sp)                  # Restaura $s2
-    lw $s1, 4($sp)                  # Restaura $s1
-    lw $s0, 8($sp)                  # Restaura $s0
-    lw $ra, 12($sp)                 # Restaura $ra (endereco de retorno)
+    lw $s2, 0($sp)                  # Restaura o valor original de $s2
+    lw $s1, 4($sp)                  # Restaura o valor original de $s1
+    lw $s0, 8($sp)                  # Restaura o valor original de $s0
+    lw $ra, 12($sp)                 # Restaura o endereco de retorno ($ra)
     addi $sp, $sp, 16               # Libera os 16 bytes alocados na pilha
     jr $ra                          # Retorna para a funcao que chamou
-	
-handle_depositar:
-    addi $sp, $sp, -12      # Aloca 12 bytes no stack (pilha)
-    sw $ra, 8($sp)          # Salva $ra (endereco de retorno) no stack
-    sw $s0, 4($sp)          # Salva $s0 (ponteiro do cliente) no stack
-    sw $s1, 0($sp)          # Salva $s1 (valor do deposito) no stack
-    
-    # Em MIPS, $s1 (do main) ainda contem o ponteiro para os argumentos ("CONTA-VALOR")
 
-    # 1. Parsear CONTA (arg1)
-    la $a0, buffer_temp     # $a0 (destino) = buffer_temp
-    li $a1, '-'             # $a1 (delimitador) = '-'
-    move $a2, $s1           # $a2 (fonte) = ponteiro para "CONTA-VALOR"
-    jal parse_campo         # parse_campo: Copia da fonte ($a2) para o destino ($a0) ate achar o delimitador ($a1).
-                            # Retorna em $v0 o ponteiro para o resto da string (depois do '-')
-    move $s1, $v0           # Salva o ponteiro para o "VALOR" (retorno de $v0) em $s1
+handle_depositar:
+    addi $sp, $sp, -12      # Aloca 12 bytes na pilha
+    sw $ra, 8($sp)          # Salva o endereco de retorno ($ra)
+    sw $s0, 4($sp)          # Salva $s0 (para o ponteiro do cliente)
+    sw $s1, 0($sp)          # Salva $s1 (para o valor do deposito)
+
+    # O registrador $s1 (vindo do 'main') contem o ponteiro para os argumentos ("CONTA-VALOR")
+
+    # 1. Extrair a CONTA (primeiro argumento)
+    la $a0, buffer_temp     # $a0 = aponta para o buffer temporario
+    li $a1, '-'             # $a1 = caractere '-'
+    move $a2, $s1           # $a2 = ponteiro para "CONTA-VALOR"
+    jal parse_campo         # Chama a funcao que extrai o campo
     
-    # 2. Parsear VALOR (arg2) - (CORRIGIDO)
-    la $a0, buffer_args     # $a0 (destino) = buffer_args (Um buffer DIFERENTE para nao sobrescrever a CONTA)
-    li $a1, '-'             # $a1 (delimitador) = '-' (parse_campo trata o fim da string se nao achar)
-    move $a2, $s1           # $a2 (fonte) = ponteiro para "VALOR" (que salvamos em $s1)
-    jal parse_campo         # Chama o parse_campo novamente
-    # Agora, buffer_temp contem "CONTA" e buffer_args contem "VALOR"
+    # A funcao retorna em $v0 o ponteiro para o resto ("VALOR")
+    move $s1, $v0           # Salva o ponteiro para o "VALOR" em $s1
+
+    # 2. Extrair o VALOR (segundo argumento)
+    la $a0, buffer_args     # $a0 = aponta para o buffer de argumentos
+    li $a1, '-'             # $a1 = '-' (nao importa, e o ultimo argumento)
+    move $a2, $s1           # $a2 = ponteiro para "VALOR"
+    jal parse_campo         # Extrai o valor
+    # Agora, 'buffer_temp' tem a string da CONTA e 'buffer_args' tem a string do VALOR
+
+    # 3. Buscar o cliente
+    la $a0, buffer_temp     # $a0 = passa a CONTA como argumento
+    jal buscar_cliente_por_conta_completa # Chama a funcao de busca
+
+    # 4. Tratar erro (se cliente nao foi encontrado)
+    beqz $v0, depositar_falha_cliente # Se $v0 for 0, pula para a rotina de falha
+
+    # 5. Salvar ponteiro do cliente
+    move $s0, $v0           # Salva o ponteiro do cliente em $s0
+
+    # 6. Converter VALOR (string) para inteiro
+    la $a0, buffer_args     # $a0 = passa a string "VALOR" (de buffer_args) como argumento
+    jal atoi                # Converte a string para inteiro
+    move $s1, $v0           # Salva o valor em $s1
+
+    # 7. Atualizar Saldo do cliente
+    lw $t0, 72($s0)         # Carrega o saldo atual do cliente
+    add $t0, $t0, $s1       # Soma o valor do deposito ao saldo
+    sw $t0, 72($s0)         # Salva o novo saldo na memoria do cliente
+
+    # 8. Registrar a Transacao
+    la $a0, 12($s0)         # $a0 = ponteiro para a string da conta
+    move $a1, $s1           # $a1 = valor do deposito
+    li $a2, 1               # $a2 = tipo 1 (definido como "Deposito")
+    jal registrar_transacao_debito # Chama a funcao de registro 
+
+    # 9. Imprimir Sucesso
+    li $v0, 4               
+    la $a0, msg_deposito_sucesso 
+    syscall                
+
+    # 10. Imprimir Sucesso
+    lw $a0, 72($s0)         # Carrega o novo saldo em $a0
+    jal print_moeda         # Chama a funcao que imprime
+
+    j depositar_fim         # Pula a rotina de falha, indo para o fim
+
+#Imprime mensagem de falha no deposito
+depositar_falha_cliente:
+    li $v0, 4            
+    la $a0, msg_cliente_inexistente 
+    syscall                
+
+depositar_fim:
+    # Restaurar a pilha
+    lw $s1, 0($sp)          # Restaura o valor original de $s1
+    lw $s0, 4($sp)          # Restaura o valor original de $s0
+    lw $ra, 8($sp)          # Restaura o endereco de retorno $ra
+    addi $sp, $sp, 12       # Libera os 12 bytes alocados na pilha
+
+    j cli_loop              # Retorna ao loop principal do programa
+
+handle_sacar:
+    addi $sp, $sp, -12      # Aloca 12 bytes na pilha
+    sw $ra, 8($sp)          # Salva o endereco de retorno ($ra)
+    sw $s0, 4($sp)          # Salva $s0 (para o ponteiro do cliente)
+    sw $s1, 0($sp)          # Salva $s1 (para o valor do saque)
+    
+    # $s1 contem o ponteiro para os argumentos
+
+    # 1. Extrair a CONTA 
+    la $a0, buffer_temp     # $a0 = aponta para o buffer temporario
+    li $a1, '-'             # $a1 = caractere '-'
+    move $a2, $s1           # $a2 = ponteiro para "CONTA-VALOR"
+    jal parse_campo         # Extrai a conta
+    move $s1, $v0           # Salva o ponteiro para o "VALOR" em $s1
+    
+    # 2. Extrair o VALOR
+    la $a0, buffer_args     # $a0 = aponta para o buffer de argumentos
+    li $a1, '-'             # $a1 = delimitador
+    move $a2, $s1           # $a2 (fonte) = ponteiro para "VALOR"
+    jal parse_campo         # Extrai o valor
     
     # 3. Buscar o cliente
-    la $a0, buffer_temp     # $a0 = A CONTA (que esta segura em buffer_temp)
-    jal buscar_cliente_por_conta_completa # Busca o cliente
+    la $a0, buffer_temp     # $a0 = passa a CONTA como argumento
+    jal buscar_cliente_por_conta_completa # Chama a funcao de busca
     
-    # 4. Tratar erro
-    beqz $v0, depositar_falha_cliente # Se $v0 (retorno) for 0, o cliente nao existe
+    # 4. Tratar erro (se cliente nao foi encontrado)
+    beqz $v0, sacar_falha_cliente # Se $v0 for 0, pula para a rotina de falha
     
     # 5. Salvar ponteiro do cliente
-    move $s0, $v0           # Salva o ponteiro do cliente (retornado em $v0) em $s0
+    move $s0, $v0           # Salva o ponteiro do cliente em $s0
     
-    # 6. Converter VALOR para inteiro
-    la $a0, buffer_args     # $a0 = A string "VALOR" (que esta em buffer_args)
-    jal atoi                # Converte a string em $a0 para um inteiro (em $v0)
-    move $s1, $v0           # Salva o valor (inteiro) em $s1
+    # 6. Converter VALOR (string) para inteiro
+    la $a0, buffer_args     # $a0 = passa a string "VALOR" como argumento
+    jal atoi                # Converte para inteiro (resultado em $v0)
+    move $s1, $v0           # Salva o valor (inteiro) do saque em $s1
     
-    # 7. Atualizar Saldo
-    lw $t0, 72($s0)         # Carrega o saldo atual (Offset 72) do cliente ($s0)
-    add $t0, $t0, $s1       # Soma o valor do deposito ($s1)
-    sw $t0, 72($s0)         # Salva o novo saldo na memoria do cliente
-    
-    # 8. Registrar Transacao
-    la $a0, 12($s0)         # $a0 = ponteiro para a string da conta (Offset 12 do cliente)
-    move $a1, $s1           # $a1 = valor (inteiro) do deposito
-    li $a2, 1               # $a2 = tipo 1 (definido como "Deposito")
-    jal registrar_transacao_debito # Chama a funcao helper
-    
-    # 9. Imprimir Sucesso (Parte 1)
-    li $v0, 4               # Codigo da syscall: imprimir string
-    la $a0, msg_deposito_sucesso # Carrega a mensagem "Deposito realizado com sucesso"
-    syscall                 # Executa a impressao
-    
-    # 10. Imprimir Sucesso (Parte 2 - Saldo)
-    lw $a0, 72($s0)         # Carrega o NOVO saldo (Offset 72) em $a0
-    jal print_moeda         # Chama a funcao que imprime "R$ XXX,XX\n"
-    
-    j depositar_fim         # Pula a rotina de falha
+    # 7. Verificar Saldo
+    lw $t0, 72($s0)         # Carrega o saldo atual
+    blt $t0, $s1, sacar_falha_saldo_insuficiente # Se (Saldo < Valor_Saque), pula para falha
 
-depositar_falha_cliente:
-    li $v0, 4               # Codigo da syscall: imprimir string
-    la $a0, msg_cliente_inexistente # Carrega a mensagem "Falha: cliente inexistente"
-    syscall                 # Executa a impressao
-    
-depositar_fim:
-    # Epilogo: Restaurar o stack
-    lw $s1, 0($sp)          # Restaura $s1
-    lw $s0, 4($sp)          # Restaura $s0
-    lw $ra, 8($sp)          # Restaura $ra
-    addi $sp, $sp, 12       # Libera o   
-    
-    j cli_loop 
-    
-handle_sacar:
-    addi $sp, $sp, -12      # Aloca 12 bytes no stack (pilha)
-    sw $ra, 8($sp)          # Salva $ra (endereco de retorno) no stack
-    sw $s0, 4($sp)          # Salva $s0 (ponteiro do cliente) no stack
-    sw $s1, 0($sp)          # Salva $s1 (valor do deposito) no stack
-    
-    # Em MIPS, $s1 (do main) ainda contem o ponteiro para os argumentos ("CONTA-VALOR")
+    # 8. Saldo OK, continuar com o saque
+    sub $t0, $t0, $s1       # Subtrai o valor do saque ($s1) do saldo ($t0)
+    sw $t0, 72($s0)         # Salva o novo saldo na memoria
 
-    # Parsear CONTA (arg1)
-    la $a0, buffer_temp     # $a0 (destino) = buffer_temp
-    li $a1, '-'             # $a1 (delimitador) = '-'
-    move $a2, $s1           # $a2 (fonte) = ponteiro para "CONTA-VALOR"
-    jal parse_campo         # parse_campo: Copia da fonte ($a2) para o destino ($a0) ate achar o delimitador ($a1).
-                            # Retorna em $v0 o ponteiro para o resto da string (depois do '-')
-    move $s1, $v0           # Salva o ponteiro para o "VALOR" (retorno de $v0) em $s1
-    
-    # Parsear VALOR (arg2) - (CORRIGIDO)
-    la $a0, buffer_args     # $a0 (destino) = buffer_args (Um buffer DIFERENTE para nao sobrescrever a CONTA)
-    li $a1, '-'             # $a1 (delimitador) = '-' (parse_campo trata o fim da string se nao achar)
-    move $a2, $s1           # $a2 (fonte) = ponteiro para "VALOR" (que salvamos em $s1)
-    jal parse_campo         # Chama o parse_campo novamente
-    # Agora, buffer_temp contem "CONTA" e buffer_args contem "VALOR"
-    
-    # Buscar o cliente
-    la $a0, buffer_temp     # $a0 = A CONTA (que esta segura em buffer_temp)
-    jal buscar_cliente_por_conta_completa # Busca o cliente
-    
-    # Tratar erro
-    beqz $v0, sacar_falha_cliente # Se $v0 (retorno) for 0, o cliente nao existe
-    
-    # Salvar ponteiro do cliente
-    move $s0, $v0           # Salva o ponteiro do cliente (retornado em $v0) em $s0
-    
-    # Converter VALOR para inteiro
-    la $a0, buffer_args     # $a0 = A string "VALOR" (que esta em buffer_args)
-    jal atoi                # Converte a string em $a0 para um inteiro (em $v0)
-    move $s1, $v0           # Salva o valor (inteiro) em $s1
-    
-    # Verificar Saldo
-    lw $t0, 72($s0)         # Carrega o Saldo (Offset 72)
-    blt $t0, $s1, sacar_falha_saldo_insuficiente # Se Saldo < Valor_Saque, pule
+    # 9. Registrar Transacao (com valor negativo)
+    la $a0, 12($s0)         # $a0 = ponteiro para a string da conta 
+    sub $a1, $zero, $s1     # $a1 = 0 - $s1 (inverte o sinal, tornando o valor negativo)
+    li $a2, 2               # $a2 = tipo 2 (definido como "Saque")
+    jal registrar_transacao_debito # Chama a funcao de registro
 
-    # Saldo OK, continuar com o saque
-    sub $t0, $t0, $s1       # Subtrai o valor do saque
-    sw $t0, 72($s0)         # Salva o novo saldo
-
-    # Registrar Transacao (com valor NEGATIVO)
-    la $a0, 12($s0)         # $a0 = ponteiro para a conta (Offset 12)
-    sub $a1, $zero, $s1     # $a1 = 0 - $s1 (para tornar o valor negativo)
-    li $a2, 2               # $a2 = Tipo 2 (vamos definir 2 = "Saque")
-    jal registrar_transacao_debito
-
-    # Imprimir Sucesso
+    # 10. Imprimir Sucesso
     li $v0, 4
-    la $a0, msg_saque_sucesso # "Saque realizado com sucesso\n"
+    la $a0, msg_saque_sucesso
     syscall
 
-    j sacar_fim             # Pula as mensagens de erro
+    j sacar_fim             # Pula as rotinas de falha, indo para o fim
 
+# Mensagem de falha na tentativa de sacar um valor
 sacar_falha_cliente:
     li $v0, 4
-    la $a0, msg_cliente_inexistente # "Falha: cliente inexistente\n"
+    la $a0, msg_cliente_inexistente
     syscall
-    j sacar_fim
+    j sacar_fim               # Vai para o fim da funcao
 
+#Mensagem de saldo insuficiente 
 sacar_falha_saldo_insuficiente:
     li $v0, 4
-    la $a0, msg_saldo_insuficiente # "Falha: saldo insuficente\n"
+    la $a0, msg_saldo_insuficiente 
     syscall
 
 sacar_fim:
-    lw $s1, 0($sp)
-    lw $s0, 4($sp)
-    lw $ra, 8($sp)
-    addi $sp, $sp, 12
-    j cli_loop
+    lw $s1, 0($sp)          # Restaura o valor original de $s1
+    lw $s0, 4($sp)          # Restaura o valor original de $s0
+    lw $ra, 8($sp)          # Restaura o endereco de retorno $ra
+    addi $sp, $sp, 12       # Libera os 12 bytes alocados na pilha
+    j cli_loop              # Retorna ao loop principal
     
 # FUNCAO Handler para transferir_debito
 handle_transferir_debito:
-    addi $sp, $sp, -16
-    sw $ra, 12($sp)
-    sw $s0, 8($sp)          # $s0 = ponteiro cliente ORIGEM
-    sw $s1, 4($sp)          # $s1 = ponteiro cliente DESTINO
-    sw $s2, 0($sp)          # $s2 = valor da transferencia
+    addi $sp, $sp, -16      # Aloca 16 bytes na pilha
+    sw $ra, 12($sp)         # Salva o endereco de retorno ($ra)
+    sw $s0, 8($sp)          # Salva $s0 (para ponteiro do cliente ORIGEM)
+    sw $s1, 4($sp)          # Salva $s1 (para ponteiro do cliente DESTINO)
+    sw $s2, 0($sp)          # Salva $s2 (para o valor da transferencia)
 
-    # Parsear CONTA_ORIGEM (para buffer_temp)
-    la $a0, buffer_temp
-    li $a1, '-'
-    move $a2, $s1           # $s1 vem do main com os args
-    jal parse_campo
-    move $s1, $v0           # $s1 agora aponta para "CONTA_DESTINO-VALOR"
+    # 1. Parsear CONTA_ORIGEM (primeiro argumento)
+    la $a0, buffer_temp     # $a0 (destino) = buffer_temp
+    li $a1, '-'             # $a1 (delimitador)
+    move $a2, $s1           # $a2 (fonte) = ponteiro para "ORIGEM-DESTINO-VALOR"
+    jal parse_campo         # Extrai a conta de origem
+    move $s1, $v0           # Salva o ponteiro para o resto ("DESTINO-VALOR") em $s1
 
-    # Parsear CONTA_DESTINO (para buffer_args)
-    la $a0, buffer_args
-    li $a1, '-'
-    move $a2, $s1
-    jal parse_campo
-    move $s1, $v0           # $s1 agora aponta para "VALOR"
+    # 2. Parsear CONTA_DESTINO (segundo argumento)
+    la $a0, buffer_args     # $a0 (destino) = buffer_args
+    li $a1, '-'             # $a1 (delimitador)
+    move $a2, $s1           # $a2 (fonte) = ponteiro para "DESTINO-VALOR"
+    jal parse_campo         # Extrai a conta de destino
+    move $s1, $v0           # Salva o ponteiro para o resto ("VALOR") em $s1
 
-    # Parsear VALOR (para buffer_conta_completa - so para reusar um buffer)
-    la $a0, buffer_conta_completa 
-    li $a1, '-'
-    move $a2, $s1
-    jal parse_campo
+    # 3. Parsear VALOR (terceiro argumento)
+    la $a0, buffer_conta_completa # $a0 (destino) = reutiliza outro buffer
+    li $a1, '-'             # $a1 (delimitador)
+    move $a2, $s1           # $a2 (fonte) = ponteiro para "VALOR"
+    jal parse_campo         # Extrai o valor
 
-    # Buscar cliente ORIGEM (conta em buffer_temp)
-    la $a0, buffer_temp
+    # 4. Buscar cliente ORIGEM (conta esta em buffer_temp)
+    la $a0, buffer_temp     # Passa a string da conta de origem
     jal buscar_cliente_por_conta_completa
-    beqz $v0, transferir_falha_origem
-    move $s0, $v0           # Salva ponteiro ORIGEM
+    beqz $v0, transferir_falha_origem # Se $v0 for 0, pula para falha (origem nao existe)
+    move $s0, $v0           # Salva o ponteiro do cliente ORIGEM em $s0
 
-    # Buscar cliente DESTINO (conta em buffer_args)
-    la $a0, buffer_args
+    # 5. Buscar cliente DESTINO (conta esta em buffer_args)
+    la $a0, buffer_args     # Passa a string da conta de destino
     jal buscar_cliente_por_conta_completa
-    beqz $v0, transferir_falha_destino
-    move $s1, $v0           # Salva ponteiro DESTINO
+    beqz $v0, transferir_falha_destino # Se $v0 for 0, pula para falha (destino nao existe)
+    move $s1, $v0           # Salva o ponteiro do cliente DESTINO em $s1
 
-    # Converter valor (string em buffer_conta_completa)
-    la $a0, buffer_conta_completa
+    # 6. Converter VALOR (string) para inteiro
+    la $a0, buffer_conta_completa # Passa a string do valor
     jal atoi
-    move $s2, $v0           # Salva valor (inteiro) em $s2
+    move $s2, $v0           # Salva o valor (inteiro) da transferencia em $s2
 
-    # 7. Logica de saque (no cliente $s0)
-    lw $t0, 72($s0)         # Carrega saldo origem
-    blt $t0, $s2, transferir_falha_saldo # Se Saldo_Origem < Valor, pule
+    # 7. Logica de SAQUE (no cliente ORIGEM, $s0)
+    lw $t0, 72($s0)         # Carrega o saldo da origem
+    blt $t0, $s2, transferir_falha_saldo # Se (Saldo_Origem < Valor), pula para falha
 
-    sub $t0, $t0, $s2       # Subtrai da origem
-    sw $t0, 72($s0)         # Salva novo saldo na origem
+    # Saldo OK, continua
+    sub $t0, $t0, $s2       # Subtrai o valor ($s2) do saldo da origem ($t0)
+    sw $t0, 72($s0)         # Salva o novo saldo na origem
 
-    # 8. Logica de deposito (no cliente $s1)
-    lw $t1, 72($s1)         # Carrega saldo destino
-    add $t1, $t1, $s2       # Adiciona o valor
-    sw $t1, 72($s1)         # Salva novo saldo no destino
+    # 8. Logica de DEPOSITO (no cliente DESTINO, $s1)
+    lw $t1, 72($s1)         # Carrega o saldo do destino
+    add $t1, $t1, $s2       # Adiciona o valor ($s2) ao saldo do destino ($t1)
+    sw $t1, 72($s1)         # Salva o novo saldo no destino
 
-    # 9. Registrar Transacao de saida (na origem)
-    la $a0, 12($s0)         # Conta origem
-    sub $a1, $zero, $s2     # Valor (negativo)
-    li $a2, 3               # Tipo 3 (vamos definir 3 = "Transferencia Debito")
+    # 9. Registrar Transacao de SAIDA (na ORIGEM)
+    la $a0, 12($s0)         # $a0 = ponteiro para a conta de origem (Offset 12)
+    sub $a1, $zero, $s2     # $a1 = valor (NEGATIVO)
+    li $a2, 3               # $a2 = tipo 3 ("Transferencia Debito")
     jal registrar_transacao_debito
 
-    # Registrar Transacao de ENTRADA (no destino)
-    la $a0, 12($s1)         # Conta destino
-    move $a1, $s2           # Valor (positivo)
-    li $a2, 1               # Tipo 1 (Deposito)
+    # 10. Registrar Transacao de ENTRADA (no DESTINO)
+    la $a0, 12($s1)         # $a0 = ponteiro para a conta de destino (Offset 12)
+    move $a1, $s2           # $a1 = valor (POSITIVO)
+    li $a2, 1               # $a2 = tipo 1 ("Deposito")
     jal registrar_transacao_debito
 
-    # Imprimir Sucesso
+    # 11. Imprimir Sucesso
     li $v0, 4
-    la $a0, msg_transferencia_sucesso
+    la $a0, msg_transferencia_sucesso # Carrega a mensagem "Transferencia realizada com sucesso\n"
     syscall
-    j transferir_fim
+    j transferir_fim                # Pula para o fim
 
 transferir_falha_origem:
     li $v0, 4
-    la $a0, msg_conta_origem_inexistente
+    la $a0, msg_conta_origem_inexistente # Carrega a mensagem "Falha: conta origem inexistente\n"
     syscall
-    j transferir_fim
+    j transferir_fim                # Pula para o fim
 
 transferir_falha_destino:
     li $v0, 4
-    la $a0, msg_conta_destino_inexistente
+    la $a0, msg_conta_destino_inexistente # Carrega a mensagem "Falha: conta destino inexistente\n"
     syscall
-    j transferir_fim
+    j transferir_fim                # Pula para o fim
 
 transferir_falha_saldo:
     li $v0, 4
-    la $a0, msg_saldo_insuficiente
+    la $a0, msg_saldo_insuficiente # Carrega a mensagem "Falha: saldo insuficente\n"
     syscall
+    # (O fluxo continua para 'transferir_fim' logo abaixo)
 
 transferir_fim:
-    lw $s2, 0($sp)
-    lw $s1, 4($sp)
-    lw $s0, 8($sp)
-    lw $ra, 12($sp)
-    addi $sp, $sp, 16
-    j cli_loop
+    lw $s2, 0($sp)              # Restaura o valor original de $s2
+    lw $s1, 4($sp)              # Restaura o valor original de $s1
+    lw $s0, 8($sp)              # Restaura o valor original de $s0
+    lw $ra, 12($sp)             # Restaura o endereco de retorno $ra
+    addi $sp, $sp, 16           # Libera os 16 bytes alocados na pilha
+    j cli_loop                  # Retorna ao loop principal
     
-##### (NOVO) FUNCAO Handler para debito_extrato #####
-# Formato: debito_extrato-CONTA
+# Funcao Handler para debito_extrato
 handle_debito_extrato:
-    addi $sp, $sp, -20
-    sw $ra, 16($sp)
-    sw $s0, 12($sp)         # $s0 = ponteiro do cliente
-    sw $s1, 8($sp)          # $s1 = contador (i) do loop
-    sw $s2, 4($sp)          # $s2 = limite (num_transacoes_debito)
-    sw $s3, 0($sp)          # $s3 = ponteiro para a string da conta do cliente
+    addi $sp, $sp, -20      # Aloca 20 bytes na pilha
+    sw $ra, 16($sp)         # Salva o endereco de retorno ($ra)
+    sw $s0, 12($sp)         # Salva $s0 (para o ponteiro do cliente)
+    sw $s1, 8($sp)          # Salva $s1 (para o contador 'i' do loop)
+    sw $s2, 4($sp)          # Salva $s2 (para o limite do loop)
+    sw $s3, 0($sp)          # Salva $s3 (para o ponteiro da string da conta)
 
-    # Parsear CONTA (para buffer_temp)
-    la $a0, buffer_temp
-    li $a1, '-'
-    move $a2, $s1           # $s1 vem do main
-    jal parse_campo
+    # 1. Parsear CONTA (unico argumento)
+    la $a0, buffer_temp     # $a0 (destino) = buffer_temp
+    li $a1, '-'             # $a1 (delimitador)
+    move $a2, $s1           # $a2 (fonte) = $s1 vindo do main (com "CONTA")
+    jal parse_campo         # Extrai a conta
 
-    # Buscar cliente (pela conta em buffer_temp)
-    la $a0, buffer_temp
+    # 2. Buscar cliente
+    la $a0, buffer_temp     # Passa a string da conta
     jal buscar_cliente_por_conta_completa
-    beqz $v0, extrato_falha_cliente
-    move $s0, $v0           # Salva ponteiro do cliente
+    beqz $v0, extrato_falha_cliente # Se $v0 for 0, pula para falha
+    move $s0, $v0           # Salva o ponteiro do cliente em $s0
 
-    # Imprimir Cabecalho
+    # 3. Imprimir Cabecalho do Extrato
     li $v0, 4
-    la $a0, msg_extrato_cabecalho # "Extrato da conta "
+    la $a0, msg_extrato_cabecalho # Imprime "Extrato da conta "
     syscall
     la $a0, buffer_temp     # Imprime a conta (XXXXXX-X) que o usuario digitou
     syscall
-    la $a0, newline
+    la $a0, newline         # Imprime uma nova linha
     syscall
 
-    # Preparar o Loop
-    la $s3, 12($s0)         # $s3 = ponteiro para a string da conta (Offset 12)
+    # 4. Preparar o Loop
+    la $s3, 12($s0)         # $s3 = ponteiro para a string da conta do cliente
     li $s1, 0               # $s1 = i = 0
     la $t0, num_transacoes_debito
-    lw $s2, 0($t0)          # $s2 = limite (num_transacoes_debito)
+    lw $s2, 0($t0)          # $s2 = limite (numero total de transacoes registradas)
 
 extrato_loop:
-    bge $s1, $s2, extrato_fim_loop # Se (i >= limite), fim
+    bge $s1, $s2, extrato_fim_loop # Se (i >= limite), termina o loop
 
-    # Calcular endereco da transacao[i]
-    # Endereco = transacoes_debito + (i * 20)
-    li $t0, 20
+    # 5. Calcular endereco da transacao[i]
+    li $t0, 20              # $t0 = tamanho da struct (20 bytes)
     mul $t1, $s1, $t0       # $t1 = i * 20
-    la $t2, transacoes_debito
-    add $t2, $t2, $t1       # $t2 = ponteiro para transacoes_debito[i]
+    la $t2, transacoes_debito # $t2 = endereco base do array
+    add $t2, $t2, $t1       # $t2 = endereco de transacoes_debito[i]
 
-    # Comparar a conta da transacao com a conta do cliente
-    # $a0 = conta do cliente ($s3)
-    # $a1 = conta da transacao (Offset 0 do slot $t2)
-    move $a0, $s3
-    move $a1, $t2           # O (Offset 0) ja e o inicio da string
-    jal strcmp
+    # 6. Comparar a conta da transacao[i] com a conta do cliente
+    move $a0, $s3           # $a0 = conta do cliente (de $s3)
+    move $a1, $t2           # $a1 = conta da transacao (Offset 0 do slot $t2)
+    jal strcmp              # Compara as duas strings
 
-    bnez $v0, extrato_proxima_transacao # Se $v0 != 0 (diferentes), pule
+    bnez $v0, extrato_proxima_transacao # Se $v0 != 0, pula esta transacao
 
-    # CONTAS IGUAIS: Imprimir a transacao
-
+    # 7. CONTAS IGUAIS: Imprimir os dados da transacao
     # Imprimir TIPO
-    lw $t3, 12($t2)         # Carrega o Tipo (Offset 12)
-    beq $t3, 1, extrato_tipo1
-    beq $t3, 2, extrato_tipo2
-    beq $t3, 3, extrato_tipo3
-    j extrato_imprimir_valor # Pula se for tipo desconhecido
+    lw $t3, 12($t2)         # Carrega o Tipo da transacao
+    beq $t3, 1, extrato_tipo1 # Se tipo 1, pula para imprimir "Deposito"
+    beq $t3, 2, extrato_tipo2 # Se tipo 2, pula para imprimir "Saque"
+    beq $t3, 3, extrato_tipo3 # Se tipo 3, pula para imprimir "Transferencia"
+    j extrato_imprimir_valor # Pula se for um tipo desconhecido (ou 0)
 
 extrato_tipo1:
     li $v0, 4
-    la $a0, msg_extrato_tipo1 # "Tipo: Deposito"
+    la $a0, msg_extrato_tipo1 # Imprime "Tipo: Deposito"
     syscall
     j extrato_imprimir_valor
+
 extrato_tipo2:
     li $v0, 4
-    la $a0, msg_extrato_tipo2 # "Tipo: Saque"
+    la $a0, msg_extrato_tipo2 # Imprime "Tipo: Saque"
     syscall
     j extrato_imprimir_valor
+
 extrato_tipo3:
     li $v0, 4
-    la $a0, msg_extrato_tipo3 # "Tipo: Transferencia"
+    la $a0, msg_extrato_tipo3 # Imprime "Tipo: Transferencia"
     syscall
 
 extrato_imprimir_valor:
     # Imprimir Valor
     li $v0, 4
-    la $a0, msg_extrato_valor # " | Valor: "
+    la $a0, msg_extrato_valor # Imprime " | Valor: "
     syscall
 
-    lw $a0, 8($t2)          # Carrega o Valor (Offset 8)
-    jal print_moeda         # print_moeda ja imprime "R$ XXX,XX\n"
+    lw $a0, 8($t2)          # Carrega o Valor (Offset 8) da transacao
+    jal print_moeda         # Chama a funcao que imprime "R$ XXX,XX\n"
 
 extrato_proxima_transacao:
-    addi $s1, $s1, 1        # i++
-    j extrato_loop
+    addi $s1, $s1, 1        # i++ (incrementa o contador do loop)
+    j extrato_loop          # Volta ao inicio do loop
 
 extrato_falha_cliente:
     li $v0, 4
-    la $a0, msg_cliente_inexistente
+    la $a0, msg_cliente_inexistente # Imprime "Falha: cliente inexistente\n"
     syscall
+    # (O fluxo continua para 'extrato_fim_loop' logo abaixo)
 
 extrato_fim_loop:
     # Imprime um newline extra para formatacao
@@ -801,17 +801,18 @@ extrato_fim_loop:
     la $a0, newline
     syscall
 
+    # Restaurar a pilha
     lw $s3, 0($sp)
     lw $s2, 4($sp)
     lw $s1, 8($sp)
     lw $s0, 12($sp)
     lw $ra, 16($sp)
-    addi $sp, $sp, 20
-    j cli_loop
-    	
+    addi $sp, $sp, 20       # Libera os 20 bytes alocados
+    j cli_loop              # Retorna ao loop principal
+    
 # FUNCAO logica_cadastro_cliente
-# Esta função assume que buffer_cpf, buffer_conta, e buffer_nome
-# já foram preenchidos pelo 'main'
+# Esta funï¿½ï¿½o assume que buffer_cpf, buffer_conta, e buffer_nome
+# jï¿½ foram preenchidos pelo 'main'
 logica_cadastro_cliente:
     addi $sp, $sp, -4
     sw $ra, 0($sp)
@@ -823,17 +824,17 @@ logica_cadastro_cliente:
     lw $t3, 0($t2)
     bge $t1, $t3, erro_limite_clientes
 
-    # Verificar se CPF já existe
+    # Verificar se CPF jï¿½ existe
     la $a0, buffer_cpf
     jal verificar_cpf_existe
     beq $v0, 1, erro_cpf_duplicado
 
-    # Verificar se conta já existe
+    # Verificar se conta jï¿½ existe
     la $a0, buffer_conta
     jal verificar_conta_existe
     beq $v0, 1, erro_conta_duplicada
 
-    # Calcular dígito verificador
+    # Calcular dï¿½gito verificador
     la $a0, buffer_conta
     jal calcular_digito_verificador
 
@@ -914,12 +915,12 @@ logica_cadastro_cliente:
         addi $sp, $sp, 4
         jr $ra
 
-# --- Funções de "Em Construção" ---
-# (Elas são todas tratadas pelo 'handle_em_construcao' no main)
+# --- Funï¿½ï¿½es de "Em Construï¿½ï¿½o" ---
+# (Elas sï¿½o todas tratadas pelo 'handle_em_construcao' no main)
 
 ##### FUNCOES DE LIMPEZA DE NEWLINE (MANTIDAS) #####
 
-# Limpador genérico para buffer_comando
+# Limpador genï¿½rico para buffer_comando
 limpar_newline_comando:
     la $t0, buffer_comando
     loop_limpar_comando:
@@ -1039,7 +1040,7 @@ calcular_digito_verificador:
     mul $t2, $t2, 7
     add $t1, $t1, $t2
 
-    # Resto da divisão por 11
+    # Resto da divisï¿½o por 11
     li $t3, 11
     div $t1, $t3
     mfhi $v0
@@ -1126,15 +1127,15 @@ verificar_conta_existe:
         jr $ra
 
 ##### FUNCAO Buscar Cliente por Conta Completa #####
-# Esta função é um HELPER, chamada por handle_conta_buscar
-# Entrada: $a0 = endereço da string conta (ex: 123456-7) NO BUFFER_TEMP
-# Saída: $v0 = ponteiro para o cliente, 0 se não existe
+# Esta funï¿½ï¿½o ï¿½ um HELPER, chamada por handle_conta_buscar
+# Entrada: $a0 = endereï¿½o da string conta (ex: 123456-7) NO BUFFER_TEMP
+# Saï¿½da: $v0 = ponteiro para o cliente, 0 se nï¿½o existe
 buscar_cliente_por_conta_completa:
  addi $sp, $sp, -4
  sw $ra, 0($sp)
 
  # Formatar a conta de busca (123456-7) para o formato salvo (1234567\0)
- # A conta já está em $a0 (buffer_temp), vamos formatá-la no buffer_conta_completa
+ # A conta jï¿½ estï¿½ em $a0 (buffer_temp), vamos formatï¿½-la no buffer_conta_completa
  la $t0, buffer_conta_completa # Buffer de destino (limpo)
  move $t1, $a0                 # Buffer de origem (com hifen)
  li $t2, 0                     # Contador
@@ -1155,13 +1156,13 @@ buscar_cliente_por_conta_completa:
  fim_formatar_conta_busca_interno:
   sb $zero, 0($t0) # Termina a string formatada
 
- # Agora, $a0 (buffer_conta_completa) contém "1234567"
+ # Agora, $a0 (buffer_conta_completa) contï¿½m "1234567"
  la $a0, buffer_conta_completa
 
  # Loop principal de busca
  la $t0, clientes
  la $t1, num_clientes
- lw $t2, 0($t1)  # número de clientes
+ lw $t2, 0($t1)  # nï¿½mero de clientes
  li $t3, 0   # contador
 
  loop_buscar_conta_comp_interno: # Renomeado para evitar conflito
@@ -1186,7 +1187,7 @@ buscar_cliente_por_conta_completa:
    j fim_buscar_conta_comp_interno
 
   proximo_buscar_conta_comp_interno:
-   addi $t0, $t0, 128  # próximo cliente
+   addi $t0, $t0, 128  # prï¿½ximo cliente
    addi $t3, $t3, 1
    j loop_buscar_conta_comp_interno
 
@@ -1260,7 +1261,7 @@ adicionar_cliente:
 
     jr $ra
 
-# --- Funções de Persistência Comentadas ---
+# --- Funï¿½ï¿½es de Persistï¿½ncia Comentadas ---
 # ##### FUNCAO Salvar Dados (COMENTADA) #####
 # salvar_dados:
 #     addi $sp, $sp, -4
@@ -1314,7 +1315,7 @@ parse_campo:
  loop_parse_campo:
   lb $t3, 0($t2)
   beq $t3, $t1, fim_parse_campo
-  beqz $t3, fim_parse_campo_null # Se for \0, não pule
+  beqz $t3, fim_parse_campo_null # Se for \0, nï¿½o pule
 
   sb $t3, 0($t0)
   addi $t0, $t0, 1
@@ -1398,7 +1399,7 @@ print_moeda:
  sw $ra, 0($sp)
  sw $s0, 4($sp) # Salva $s0 do chamador
  sw $s1, 8($sp) # Salva $s1 do chamador
- sw $t0, 12($sp) # Salva $t0 do chamador (vamos usar $t0) <-- ADICIONADO ESPAÇO
+ sw $t0, 12($sp) # Salva $t0 do chamador (vamos usar $t0) <-- ADICIONADO ESPAï¿½O
 
  move $t0, $a0     # <-- SALVA o valor original de $a0 em $t0 PRIMEIRO!
 
@@ -1458,7 +1459,7 @@ print_moeda:
 # $a0: str1, $a1: str2
 # $v0: 0 se igual, 1 se diferente
 strcmp:
-    li $v0, 0 # Assume que são iguais
+    li $v0, 0 # Assume que sï¿½o iguais
 
     loop_strcmp:
         lb $t0, 0($a0)
@@ -1466,7 +1467,7 @@ strcmp:
 
         bne $t0, $t1, strcmp_diferente
 
-        beqz $t0, fim_strcmp # Se $t0 é \0 (e são iguais), fim
+        beqz $t0, fim_strcmp # Se $t0 ï¿½ \0 (e sï¿½o iguais), fim
 
         addi $a0, $a0, 1
         addi $a1, $a1, 1
