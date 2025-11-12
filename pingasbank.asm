@@ -167,7 +167,11 @@
     # Mensagem de alteração de limite
     msg_limite_alterado_sucesso: .asciiz "\nLimite de credito alterado com sucesso\n"
     
-    
+    # Mensagens de encerramento de conta
+    msg_conta_fechada_sucesso: .asciiz "\nConta fechada com sucesso\n"
+    msg_cpf_nao_cadastrado: .asciiz "\nFalha: CPF nao possui cadastro\n"
+    msg_saldo_devedor: .asciiz "\nFalha: saldo devedor ainda nao quitado. Saldo da conta corrente R$ "
+    msg_limite_devido: .asciiz " / Limite de credito devido: R$ "
     
 .text
 .globl main
@@ -262,17 +266,18 @@ main:
     la $a1, str_credito_extrato
     jal strcmp
     beqz $v0, handle_credito_extrato
+    
+    la $a0, buffer_temp
+    la $a1, str_alterar_limite
+    jal strcmp
+    beqz $v0, handle_alterar_limite
+    
     # --- Comandos "Em Construï¿½ï¿½o" --- #
 
     la $a0, buffer_temp
     la $a1, str_conta_fechar
     jal strcmp
-    beqz $v0, handle_em_construcao
-
-la $a0, buffer_temp
-la $a1, str_alterar_limite
-jal strcmp
-beqz $v0, handle_alterar_limite
+    beqz $v0, handle_conta_fechar
 
     la $a0, buffer_temp
     la $a1, str_salvar
@@ -298,6 +303,156 @@ beqz $v0, handle_alterar_limite
     j cli_loop
 
 # --- Handlers de Comandos ---
+
+# Implementação do handler:
+handle_conta_fechar:
+    addi $sp, $sp, -12
+    sw $ra, 8($sp)
+    sw $s0, 4($sp)          # ponteiro cliente
+    sw $s1, 0($sp)          # temporário
+
+    # 1. Parsear CONTA
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+
+    # 2. Buscar cliente
+    la $a0, buffer_temp
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, fechar_falha_cpf
+    move $s0, $v0
+
+    # 3. Verificar saldo da conta corrente (offset 72)
+    lw $t0, 72($s0)
+    bnez $t0, fechar_falha_saldo_devedor
+
+    # 4. Verificar crédito usado (offset 80)
+    lw $t1, 80($s0)
+    bnez $t1, fechar_falha_saldo_devedor
+
+    # 5. Saldos zerados: desativar conta
+    sw $zero, 84($s0)       # Status = 0 (inativo)
+
+    # 6. Limpar transações de débito
+    la $a0, 12($s0)
+    jal limpar_transacoes_debito_cliente
+
+    # 7. Limpar transações de crédito
+    la $a0, 12($s0)
+    jal limpar_transacoes_credito_cliente
+
+    # 8. Mensagem de sucesso
+    li $v0, 4
+    la $a0, msg_conta_fechada_sucesso
+    syscall
+
+    j fechar_fim
+
+fechar_falha_cpf:
+    li $v0, 4
+    la $a0, msg_cpf_nao_cadastrado
+    syscall
+    j fechar_fim
+
+fechar_falha_saldo_devedor:
+    # Imprimir mensagem base
+    li $v0, 4
+    la $a0, msg_saldo_devedor
+    syscall
+
+    # Imprimir saldo da conta corrente
+    lw $a0, 72($s0)
+    jal print_moeda
+
+    # Imprimir separador
+    li $v0, 4
+    la $a0, msg_limite_devido
+    syscall
+
+    # Imprimir crédito devido
+    lw $a0, 80($s0)
+    jal print_moeda
+
+fechar_fim:
+    lw $s1, 0($sp)
+    lw $s0, 4($sp)
+    lw $ra, 8($sp)
+    addi $sp, $sp, 12
+    j cli_loop
+
+# Função auxiliar para limpar transações de crédito:
+limpar_transacoes_credito_cliente:
+    addi $sp, $sp, -24
+    sw $ra, 20($sp)
+    sw $s0, 16($sp)
+    sw $s1, 12($sp)
+    sw $s2, 8($sp)
+    sw $s3, 4($sp)
+    sw $s4, 0($sp)
+
+    move $s0, $a0           # conta do cliente
+    li $s1, 0               # índice leitor
+    li $s2, 0               # índice escritor
+    li $s3, 0               # contador removidos
+    
+    la $s4, num_transacoes_credito
+    lw $t4, 0($s4)          # total de transações
+
+limpar_cred_loop:
+    bge $s1, $t4, limpar_cred_fim
+
+    # Calcular offset (24 bytes por transação)
+    li $t1, 24
+    mul $t5, $s1, $t1
+    la $t6, transacoes_credito
+    add $t6, $t6, $t5
+
+    # Comparar conta
+    move $a0, $s0
+    move $a1, $t6
+    jal strcmp
+
+    beqz $v0, limpar_cred_encontrada
+
+    # Diferente: copiar para posição do escritor
+    mul $t5, $s2, $t1
+    la $t7, transacoes_credito
+    add $t7, $t7, $t5
+
+    # Copiar 24 bytes
+    li $t8, 0
+limpar_cred_copiar:
+    lb $t9, 0($t6)
+    sb $t9, 0($t7)
+    addi $t6, $t6, 1
+    addi $t7, $t7, 1
+    addi $t8, $t8, 1
+    blt $t8, 24, limpar_cred_copiar
+
+    addi $s2, $s2, 1
+    j limpar_cred_proxima
+
+limpar_cred_encontrada:
+    addi $s3, $s3, 1
+
+limpar_cred_proxima:
+    addi $s1, $s1, 1
+    j limpar_cred_loop
+
+limpar_cred_fim:
+    # Atualizar contador
+    sub $t4, $t4, $s3
+    sw $t4, 0($s4)
+
+    lw $s4, 0($sp)
+    lw $s3, 4($sp)
+    lw $s2, 8($sp)
+    lw $s1, 12($sp)
+    lw $s0, 16($sp)
+    lw $ra, 20($sp)
+    addi $sp, $sp, 24
+    jr $ra
 
 # FUNCAO Handler para alterar_limite (cmd_10)
 # Comando: alterar_limite-<conta>-<novo_limite>
