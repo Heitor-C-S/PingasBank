@@ -22,7 +22,7 @@
     buffer_conta: .space 8
     buffer_conta_completa: .space 10  # XXXXXX-D\0
     buffer_nome: .space 51
-    buffer_temp: .space 100        # Usado para parsear o comando
+    buffer_temp: .space 200        # Usado para parsear o comando
     buffer_args: .space 200        # Usado para guardar o ponteiro dos args
     buffer_arquivo: .space 8000  # Buffer para ler arquivo completo
     buffer_cpf_busca: .space 12
@@ -173,6 +173,31 @@
     msg_saldo_devedor: .asciiz "\nFalha: saldo devedor ainda nao quitado. Saldo da conta corrente R$ "
     msg_limite_devido: .asciiz " / Limite de credito devido: R$ "
     
+    # Mensagens de permanencia de dados
+    msg_salvar_sucesso: .asciiz "\nDados salvos com sucesso no arquivo pingasbank_data.txt\n"
+    msg_salvar_erro: .asciiz "\nErro ao salvar dados no arquivo\n"
+    msg_recarregar_sucesso: .asciiz "\nDados recarregados com sucesso do arquivo pingasbank_data.txt\n"
+    msg_recarregar_erro: .asciiz "\nErro ao recarregar dados do arquivo\n"
+    msg_arquivo_nao_existe: .asciiz "\nArquivo nao existe. Sistema iniciado sem dados salvos.\n"
+    msg_formatar_confirmacao: .asciiz "\nATENCAO: Todos os dados serao apagados. Confirmar (S/N)? "
+    msg_formatar_sucesso: .asciiz "\nSistema formatado com sucesso. Todos os dados foram apagados.\n"
+    msg_formatar_cancelado: .asciiz "\nFormatacao cancelada.\n"
+    buffer_linha: .space 256
+    
+    # Formatação para permanencia de dados
+    arquivo_marcador_cab:    .asciiz "<CAB>"
+    arquivo_marcador_fim_cab: .asciiz "</CAB>"
+    arquivo_marcador_cli:    .asciiz "<CLI>"
+    arquivo_marcador_fim_cli: .asciiz "</CLI>"
+    arquivo_marcador_trd:    .asciiz "<TRD>"
+    arquivo_marcador_fim_trd: .asciiz "</TRD>"
+    arquivo_marcador_trc:    .asciiz "<TRC>"
+    arquivo_marcador_fim_trc: .asciiz "</TRC>"
+    
+    
+    
+    
+    
 .text
 .globl main
 
@@ -181,6 +206,9 @@ main:
     # Salva o ponteiro para os argumentos em $s1
     addi $sp, $sp, -4
     sw $s1, 0($sp)
+    
+    # NOVO: Recarregar dados automaticamente ao iniciar
+    jal recarregar_dados
 
     cli_loop:
     # Mostrar o prompt
@@ -282,17 +310,17 @@ main:
     la $a0, buffer_temp
     la $a1, str_salvar
     jal strcmp
-    beqz $v0, handle_em_construcao 
+    beqz $v0, handle_salvar 
 
     la $a0, buffer_temp
     la $a1, str_recarregar
     jal strcmp
-    beqz $v0, handle_em_construcao 
+    beqz $v0, handle_recarregar
 
     la $a0, buffer_temp
     la $a1, str_formatar
     jal strcmp
-    beqz $v0, handle_em_construcao 
+    beqz $v0, handle_formatar
 
     # --- Fim dos Comandos ---
 
@@ -1566,79 +1594,79 @@ encerrar_programa:
 # FUNCAO: limpar_transacoes_debito_cliente
 # Entrada: $a0 = ponteiro para string da conta (7 chars + \0)
 # Remove todas as transacoes de debito desta conta do array
+# ===== CORREÇÃO: FUNÇÃO LIMPAR_TRANSACOES_DEBITO_CLIENTE =====
+# O BUG estava aqui - usava 20 bytes ao invés de 24!
 limpar_transacoes_debito_cliente:
-    addi $sp, $sp, -24          # Aloca 24 bytes na pilha
-    sw $ra, 20($sp)             # Salva $ra
-    sw $s0, 16($sp)             # Salva $s0
-    sw $s1, 12($sp)             # Salva $s1
-    sw $s2, 8($sp)              # Salva $s2
-    sw $s3, 4($sp)              # Salva $s3
-    sw $s4, 0($sp)              # Salva $s4
+    addi $sp, $sp, -24
+    sw $ra, 20($sp)
+    sw $s0, 16($sp)
+    sw $s1, 12($sp)
+    sw $s2, 8($sp)
+    sw $s3, 4($sp)
+    sw $s4, 0($sp)
 
-    move $s0, $a0               # $s0 = ponteiro para string da conta
-    li $s1, 0                   # $s1 = índice leitor (i)
-    li $s2, 0                   # $s2 = índice escritor
-    li $s3, 0                   # $s3 = contador de transações removidas
+    move $s0, $a0           # conta do cliente
+    li $s1, 0               # índice leitor
+    li $s2, 0               # índice escritor
+    li $s3, 0               # contador removidos
     
-    # Carregar endereço do contador em $s4 (registrador salvo)
-    la $s4, num_transacoes_debito  # $s4 = endereço do contador
-    lw $t4, 0($s4)              # $t4 = número total de transações
+    la $s4, num_transacoes_debito
+    lw $t4, 0($s4)
 
-format_transacao_loop:
-    bge $s1, $t4, format_transacao_fim
+limpar_deb_loop:
+    bge $s1, $t4, limpar_deb_fim
 
-    # Calcular offset da transação atual
-    li $t1, 20
+    # CORREÇÃO: 24 bytes por transação (não 20!)
+    li $t1, 24
     mul $t5, $s1, $t1
     la $t6, transacoes_debito
-    add $t6, $t6, $t5           # Endereço da transação[i]
+    add $t6, $t6, $t5
 
-    # Comparar conta da transação com conta do cliente
-    move $a0, $s0               # Conta do cliente
-    move $a1, $t6               # Conta da transação
+    # Comparar conta
+    move $a0, $s0
+    move $a1, $t6
     jal strcmp
 
-    # Se igual (v0=0), pular e contar remoção
-    beqz $v0, format_conta_encontrada
+    beqz $v0, limpar_deb_encontrada
 
-    # Se diferente, copiar para posição do escritor
-    mul $t5, $s2, $t1           # Offset do escritor
+    # Diferente: copiar para posição do escritor
+    mul $t5, $s2, $t1
     la $t7, transacoes_debito
-    add $t7, $t7, $t5           # Endereço destino
+    add $t7, $t7, $t5
 
-    # Copiar 20 bytes (bloco de transação)
+    # CORREÇÃO: Copiar 24 bytes (não 20!)
     li $t8, 0
-format_copiar_bloco:
+limpar_deb_copiar:
     lb $t9, 0($t6)
     sb $t9, 0($t7)
     addi $t6, $t6, 1
     addi $t7, $t7, 1
     addi $t8, $t8, 1
-    blt $t8, 20, format_copiar_bloco
+    blt $t8, 24, limpar_deb_copiar
 
-    addi $s2, $s2, 1            # Incrementa escritor
-    j format_proxima_transacao
+    addi $s2, $s2, 1
+    j limpar_deb_proxima
 
-format_conta_encontrada:
-    addi $s3, $s3, 1            # Incrementa contador de removidos
+limpar_deb_encontrada:
+    addi $s3, $s3, 1
 
-format_proxima_transacao:
-    addi $s1, $s1, 1            # Incrementa leitor
-    j format_transacao_loop
+limpar_deb_proxima:
+    addi $s1, $s1, 1
+    j limpar_deb_loop
 
-format_transacao_fim:
-    # Atualizar contador total
+limpar_deb_fim:
     sub $t4, $t4, $s3
-    sw $t4, 0($s4)              # Salva usando $s4 que guarda o endereço
+    sw $t4, 0($s4)
 
-    lw $s4, 0($sp)              # Restaura $s4
+    lw $s4, 0($sp)
     lw $s3, 4($sp)
     lw $s2, 8($sp)
     lw $s1, 12($sp)
     lw $s0, 16($sp)
     lw $ra, 20($sp)
-    addi $sp, $sp, 24           # Libera espaço na pilha
+    addi $sp, $sp, 24
     jr $ra
+
     
 # FUNCAO registrar_transacao_debito (SEM $a4)
 # Entrada: $a0 = conta, $a1 = valor, $a2 = tipo, $a3 = data
@@ -2017,29 +2045,7 @@ transferir_fim:
     ##### FUNCAO Combinar Data e Hora #####
 # Entrada: $a0 = data (DDMMAAAA), $a1 = hora (HHMMSS)
 # Sa?da: $v0 = timestamp combinado (AAAAMMDDHHMMSS)
-combinar_data_hora:
-    # Extrair componentes da data
-    li $t0, 1000000
-    div $a0, $t0
-    mflo $t1          # DD
-    mfhi $t2          # MMAAAA
-    
-    li $t3, 10000
-    div $t2, $t3
-    mflo $t4          # MM
-    mfhi $t5          # AAAA
-    
-    # Reconstruir data no formato AAAAMMDD
-    mul $v0, $t5, 10000  # AAAA * 10000
-    add $v0, $v0, $t4    # + MM
-    mul $v0, $v0, 100    # * 100
-    add $v0, $v0, $t1    # + DD = AAAAMMDD
-    
-    # Combinar com hora (HHMMSS)
-    mul $v0, $v0, 1000000  # AAAAMMDD * 1000000
-    add $v0, $v0, $a1      # + HHMMSS = AAAAMMDDHHMMSS
-    
-    jr $ra
+
     
 # Funcao Handler para debito_extrato
 handle_debito_extrato:
@@ -2361,71 +2367,6 @@ limpar_newline_comando:
         sb $zero, 0($t0)
         jr $ra
 
-limpar_newline_cpf:
-    la $t0, buffer_cpf
-    li $t1, 0
-    loop_limpar_cpf:
-        lb $t2, 0($t0)
-        beq $t2, '\n', fim_limpar_cpf
-        beqz $t2, fim_limpar_cpf
-        addi $t0, $t0, 1
-        addi $t1, $t1, 1
-        blt $t1, 11, loop_limpar_cpf
-    fim_limpar_cpf:
-        sb $zero, 0($t0)
-        jr $ra
-
-limpar_newline_cpf_busca:
-    la $t0, buffer_cpf_busca
-    li $t1, 0
-    loop_limpar_cpf_busca:
-        lb $t2, 0($t0)
-        beq $t2, '\n', fim_limpar_cpf_busca
-        beqz $t2, fim_limpar_cpf_busca
-        addi $t0, $t0, 1
-        addi $t1, $t1, 1
-        blt $t1, 11, loop_limpar_cpf_busca
-    fim_limpar_cpf_busca:
-        sb $zero, 0($t0)
-        jr $ra
-
-limpar_newline_conta:
-    la $t0, buffer_conta
-    li $t1, 0
-    loop_limpar_conta:
-        lb $t2, 0($t0)
-        beq $t2, '\n', fim_limpar_conta
-        beqz $t2, fim_limpar_conta
-        addi $t0, $t0, 1
-        addi $t1, $t1, 1
-        blt $t1, 6, loop_limpar_conta
-    fim_limpar_conta:
-        sb $zero, 0($t0)
-        jr $ra
-
-limpar_newline_nome:
-    la $t0, buffer_nome
-    loop_limpar_nome:
-        lb $t2, 0($t0)
-        beq $t2, '\n', fim_limpar_nome
-        beqz $t2, fim_limpar_nome
-        addi $t0, $t0, 1
-        j loop_limpar_nome
-    fim_limpar_nome:
-        sb $zero, 0($t0)
-        jr $ra
-
-limpar_newline_temp:
-    la $t0, buffer_temp
-    loop_limpar_temp:
-        lb $t2, 0($t0)
-        beq $t2, '\n', fim_limpar_temp
-        beqz $t2, fim_limpar_temp
-        addi $t0, $t0, 1
-        j loop_limpar_temp
-    fim_limpar_temp:
-        sb $zero, 0($t0)
-        jr $ra
 
 ##### Funcao Calcular Digito Verificador #####
 calcular_digito_verificador:
@@ -2689,53 +2630,897 @@ adicionar_cliente:
 
     jr $ra
 
-# --- Funï¿½ï¿½es de Persistï¿½ncia Comentadas ---
-# ##### FUNCAO Salvar Dados (COMENTADA) #####
-# salvar_dados:
-#     addi $sp, $sp, -4
-#     sw $ra, 0($sp)
-#     li $v0, 4
-#     la $a0, msg_em_construcao
-#     syscall
-#     lw $ra, 0($sp)
-#     addi $sp, $sp, 4
-#     jr $ra
-#
-# ##### Helpers de Escrita em Arquivo (COMENTADOS) #####
-# escrever_string_arquivo: jr $ra
-# escrever_nome_arquivo: jr $ra
-# escrever_inteiro_arquivo: jr $ra
-#
-# ##### FUNCAO Recarregar Dados (COMENTADA) #####
-# recarregar_dados:
-#  addi $sp, $sp, -12
-#  sw $ra, 0($sp)
-#  sw $s0, 4($sp)
-#  sw $s1, 8($sp)
-#  li $v0, 4
-#  la $a0, msg_em_construcao
-#  syscall
-#  lw $s1, 8($sp)
-#  lw $s0, 4($sp)
-#  lw $ra, 0($sp)
-#  addi $sp, $sp, 12
-#  jr $ra
-#
-# ##### FUNCAO Formatar Sistema (COMENTADA) #####
-# formatar_sistema:
-#  addi $sp, $sp, -4
-#  sw $ra, 0($sp)
-#  li $v0, 4
-#  la $a0, msg_em_construcao
-#  syscall
-#  lw $ra, 0($sp)
-#  addi $sp, $sp, 4
-#  jr $ra
+# HANDLER para cmd_13: salvar
+handle_salvar:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    jal salvar_dados
+    
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    j cli_loop
 
-##### Helper parse_campo (MANTIDO) #####
-# $a0 = dest buffer, $a1 = delimiter (char), $a2 = source buffer
-# $v0 = novo ponteiro source
+# HANDLER para cmd_14: recarregar
+handle_recarregar:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    jal recarregar_dados
+    
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    j cli_loop
 
+# HANDLER para cmd_15: formatar
+handle_formatar:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    jal formatar_sistema
+    
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    j cli_loop
+
+
+# ===== FUNÇÃO SALVAR_DADOS COMPLETAMENTE CORRIGIDA =====
+salvar_dados:
+    addi $sp, $sp, -28
+    sw $ra, 24($sp)
+    sw $s0, 20($sp)      # file descriptor
+    sw $s1, 16($sp)      # contador loop
+    sw $s2, 12($sp)      # limite loop
+    sw $s3, 8($sp)       # ponteiro cliente/transação
+    sw $s4, 4($sp)       # total temp
+    sw $s5, 0($sp)       # backup
+    
+    # Abrir arquivo
+    li $v0, 13
+    la $a0, arquivo_nome
+    li $a1, 1
+    li $a2, 0
+    syscall
+    
+    bltz $v0, salvar_erro
+    move $s0, $v0
+    
+    # ===== CABEÇALHO =====
+    move $a0, $s0
+    la $a1, arquivo_marcador_cab
+    jal escrever_string
+    
+    move $a0, $s0
+    la $t0, num_clientes
+    lw $a1, 0($t0)
+    move $s4, $a1
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    la $t0, data_atual
+    lw $a1, 0($t0)
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    la $t0, hora_atual
+    lw $a1, 0($t0)
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    la $t0, tempo_ultimo_incremento
+    lw $a1, 0($t0)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    la $a1, arquivo_marcador_fim_cab
+    jal escrever_string
+    
+    move $a0, $s0
+    la $a1, newline
+    jal escrever_string
+    
+    # ===== CLIENTES =====
+    move $s2, $s4
+    li $s1, 0
+    
+salvar_loop_clientes:
+    bge $s1, $s2, salvar_transacoes_debito
+    
+    li $t0, 128
+    mul $t1, $s1, $t0
+    la $t2, clientes
+    add $s3, $t2, $t1
+    
+    lw $t3, 84($s3)
+    beqz $t3, salvar_proximo_cliente
+    
+    move $a0, $s0
+    la $a1, arquivo_marcador_cli
+    jal escrever_string
+    
+    move $a0, $s0
+    move $a1, $s3
+    jal escrever_campo_string
+    
+    move $a0, $s0
+    addi $a1, $s3, 12
+    jal escrever_campo_string
+    
+    move $a0, $s0
+    addi $a1, $s3, 20
+    jal escrever_campo_string
+    
+    move $a0, $s0
+    lw $a1, 72($s3)
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    lw $a1, 76($s3)
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    lw $a1, 80($s3)
+    jal escrever_campo_inteiro
+    
+    move $a0, $s0
+    lw $a1, 84($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    la $a1, arquivo_marcador_fim_cli
+    jal escrever_string
+    
+    move $a0, $s0
+    la $a1, newline
+    jal escrever_string
+    
+salvar_proximo_cliente:
+    addi $s1, $s1, 1
+    j salvar_loop_clientes
+    
+    # ===== TRANSAÇÕES DÉBITO =====
+salvar_transacoes_debito:
+    move $a0, $s0
+    la $a1, arquivo_marcador_trd
+    jal escrever_string
+    
+    move $a0, $s0
+    la $t0, num_transacoes_debito
+    lw $a1, 0($t0)
+    move $s4, $a1
+    jal escrever_campo_inteiro
+    
+    move $s2, $s4
+    li $s1, 0
+    
+salvar_loop_debito:
+    bge $s1, $s2, salvar_fim_debito
+    
+    # CORREÇÃO CRÍTICA: 24 bytes por transação!
+    li $t0, 24
+    mul $t1, $s1, $t0
+    la $t2, transacoes_debito
+    add $s3, $t2, $t1
+    
+    # Conta (offset 0)
+    move $a0, $s0
+    move $a1, $s3
+    jal escrever_string
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Valor (offset 8)
+    move $a0, $s0
+    lw $a1, 8($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Tipo (offset 12)
+    move $a0, $s0
+    lw $a1, 12($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Data (offset 16)
+    move $a0, $s0
+    lw $a1, 16($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Hora (offset 20)
+    move $a0, $s0
+    lw $a1, 20($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ';'
+    jal escrever_delimitador
+    
+    addi $s1, $s1, 1
+    j salvar_loop_debito
+    
+salvar_fim_debito:
+    move $a0, $s0
+    la $a1, arquivo_marcador_fim_trd
+    jal escrever_string
+    
+    move $a0, $s0
+    la $a1, newline
+    jal escrever_string
+    
+    # ===== TRANSAÇÕES CRÉDITO =====
+    move $a0, $s0
+    la $a1, arquivo_marcador_trc
+    jal escrever_string
+    
+    move $a0, $s0
+    la $t0, num_transacoes_credito
+    lw $a1, 0($t0)
+    move $s4, $a1
+    jal escrever_campo_inteiro
+    
+    move $s2, $s4
+    li $s1, 0
+    
+salvar_loop_credito:
+    bge $s1, $s2, salvar_fim_credito
+    
+    # 24 bytes por transação
+    li $t0, 24
+    mul $t1, $s1, $t0
+    la $t2, transacoes_credito
+    add $s3, $t2, $t1
+    
+    # Conta
+    move $a0, $s0
+    move $a1, $s3
+    jal escrever_string
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Valor
+    move $a0, $s0
+    lw $a1, 8($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Tipo
+    move $a0, $s0
+    lw $a1, 12($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Data
+    move $a0, $s0
+    lw $a1, 16($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ','
+    jal escrever_delimitador
+    
+    # Hora
+    move $a0, $s0
+    lw $a1, 20($s3)
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ';'
+    jal escrever_delimitador
+    
+    addi $s1, $s1, 1
+    j salvar_loop_credito
+    
+salvar_fim_credito:
+    move $a0, $s0
+    la $a1, arquivo_marcador_fim_trc
+    jal escrever_string
+    
+    move $a0, $s0
+    la $a1, newline
+    jal escrever_string
+    
+    # Fechar arquivo
+    li $v0, 16
+    move $a0, $s0
+    syscall
+    
+    li $v0, 4
+    la $a0, msg_salvar_sucesso
+    syscall
+    j salvar_fim
+    
+salvar_erro:
+    li $v0, 4
+    la $a0, msg_salvar_erro
+    syscall
+    
+salvar_fim:
+    lw $s5, 0($sp)
+    lw $s4, 4($sp)
+    lw $s3, 8($sp)
+    lw $s2, 12($sp)
+    lw $s1, 16($sp)
+    lw $s0, 20($sp)
+    lw $ra, 24($sp)
+    addi $sp, $sp, 28
+    jr $ra
+
+# ===== FUNÇÃO LER_LINHA COMPLETA DO ARQUIVO =====
+ler_linha_completa:
+    addi $sp, $sp, -20
+    sw $ra, 16($sp)
+    sw $s0, 12($sp)
+    sw $s1, 8($sp)
+    sw $s2, 4($sp)
+    sw $s3, 0($sp)
+    
+    move $s0, $a0        # fd
+    move $s1, $a1        # buffer
+    move $s2, $a1        # início do buffer
+    li $s3, 0            # contador de bytes
+    
+ler_linha_loop:
+    # Ler 1 byte
+    li $v0, 14
+    move $a0, $s0
+    move $a1, $s1
+    li $a2, 1
+    syscall
+    
+    # EOF ou erro?
+    blez $v0, ler_linha_eof
+    
+    # Verificar se é newline
+    lb $t0, 0($s1)
+    beq $t0, '\n', ler_linha_fim
+    beq $t0, '\r', ler_linha_loop  # Ignora \r
+    
+    # Avançar
+    addi $s1, $s1, 1
+    addi $s3, $s3, 1
+    j ler_linha_loop
+    
+ler_linha_eof:
+    move $v0, $s3
+    sb $zero, 0($s1)
+    j ler_linha_return
+    
+ler_linha_fim:
+    sb $zero, 0($s1)     # Substitui \n por \0
+    move $v0, $s3
+    
+ler_linha_return:
+    lw $s3, 0($sp)
+    lw $s2, 4($sp)
+    lw $s1, 8($sp)
+    lw $s0, 12($sp)
+    lw $ra, 16($sp)
+    addi $sp, $sp, 20
+    jr $ra
+
+# ===== FUNÇÃO PARSEAR CAMPO COM DELIMITADOR =====
+parsear_campo_delim:
+    move $t0, $a0        # fonte
+    move $t1, $a1        # destino
+    move $t2, $a2        # delimitador
+    
+parsear_loop:
+    lb $t3, 0($t0)
+    beqz $t3, parsear_fim_null
+    beq $t3, $t2, parsear_fim_delim
+    
+    sb $t3, 0($t1)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j parsear_loop
+    
+parsear_fim_delim:
+    sb $zero, 0($t1)
+    addi $t0, $t0, 1     # Pula delimitador
+    move $v0, $t0
+    jr $ra
+    
+parsear_fim_null:
+    sb $zero, 0($t1)
+    move $v0, $t0
+    jr $ra
+
+# ===== FUNÇÃO RECARREGAR_DADOS COMPLETAMENTE CORRIGIDA =====
+recarregar_dados:
+    addi $sp, $sp, -32
+    sw $ra, 28($sp)
+    sw $s0, 24($sp)      # file descriptor
+    sw $s1, 20($sp)      # contador
+    sw $s2, 16($sp)      # limite
+    sw $s3, 12($sp)      # ponteiro transação
+    sw $s4, 8($sp)       # buffer de linha
+    sw $s5, 4($sp)       # ponteiro de parsing
+    sw $s6, 0($sp)       # backup
+    
+    # Abrir arquivo
+    li $v0, 13
+    la $a0, arquivo_nome
+    li $a1, 0
+    li $a2, 0
+    syscall
+    move $s0, $v0
+    
+    bltz $s0, recarregar_arquivo_nao_existe
+    
+    # ===== LIMPAR DADOS ATUAIS =====
+    la $t0, num_clientes
+    sw $zero, 0($t0)
+    la $t0, num_transacoes_debito
+    sw $zero, 0($t0)
+    la $t0, num_transacoes_credito
+    sw $zero, 0($t0)
+    la $t0, data_atual
+    sw $zero, 0($t0)
+    la $t0, hora_atual
+    sw $zero, 0($t0)
+    la $t0, tempo_ultimo_incremento
+    sw $zero, 0($t0)
+    
+    # ===== LER CABEÇALHO =====
+    move $a0, $s0
+    la $a1, buffer_linha
+    jal ler_linha_completa
+    beqz $v0, recarregar_erro_formato
+    
+    # Pular "<CAB>"
+    la $s5, buffer_linha
+    addi $s5, $s5, 5
+    
+    # Ler num_clientes
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    la $a0, buffer_temp
+    jal atoi
+    la $t0, num_clientes
+    sw $v0, 0($t0)
+    move $s2, $v0        # Total de clientes
+    
+    # Ler data_atual
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    la $a0, buffer_temp
+    jal atoi
+    la $t0, data_atual
+    sw $v0, 0($t0)
+    
+    # Ler hora_atual
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    la $a0, buffer_temp
+    jal atoi
+    la $t0, hora_atual
+    sw $v0, 0($t0)
+    
+    # Ler tempo_ultimo_incremento
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, '<'
+    jal parsear_campo_delim
+    
+    la $a0, buffer_temp
+    jal atoi
+    la $t0, tempo_ultimo_incremento
+    sw $v0, 0($t0)
+    
+    # ===== RECARREGAR CLIENTES =====
+    li $s1, 0
+    
+recarregar_cliente_loop:
+    bge $s1, $s2, recarregar_transacoes_debito
+    
+    # Ler linha do cliente
+    move $a0, $s0
+    la $a1, buffer_linha
+    jal ler_linha_completa
+    beqz $v0, recarregar_erro_incompleto
+    
+    # Calcular endereço do cliente
+    li $t0, 128
+    mul $t1, $s1, $t0
+    la $t2, clientes
+    add $s3, $t2, $t1
+    
+    # Pular "<CLI>"
+    la $s5, buffer_linha
+    addi $s5, $s5, 5
+    
+    # CPF
+    move $a0, $s5
+    move $a1, $s3
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    # Conta
+    move $a0, $s5
+    addi $a1, $s3, 12
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    # Nome
+    move $a0, $s5
+    addi $a1, $s3, 20
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    # Saldo
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 72($s3)
+    
+    # Limite
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 76($s3)
+    
+    # Crédito Usado
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 80($s3)
+    
+    # Status
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, '<'
+    jal parsear_campo_delim
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 84($s3)
+    
+    addi $s1, $s1, 1
+    j recarregar_cliente_loop
+    
+    # ===== RECARREGAR TRANSAÇÕES DÉBITO =====
+recarregar_transacoes_debito:
+    # Ler linha completa de transações
+    move $a0, $s0
+    la $a1, buffer_arquivo  # USAR BUFFER MAIOR!
+    jal ler_linha_completa
+    beqz $v0, recarregar_erro_formato
+    
+    # Pular "<TRD>" e ler quantidade
+    la $s5, buffer_arquivo
+    addi $s5, $s5, 5
+    
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0           # ATUALIZA $s5 após ler quantidade!
+    
+    la $a0, buffer_temp
+    jal atoi
+    move $s2, $v0
+    la $t0, num_transacoes_debito
+    sw $v0, 0($t0)
+    
+    li $s1, 0
+    
+recarregar_loop_debito:
+    bge $s1, $s2, recarregar_transacoes_credito
+    
+    # Calcular endereço da transação
+    li $t0, 24
+    mul $t1, $s1, $t0
+    la $t2, transacoes_debito
+    add $s3, $t2, $t1
+    
+    # CRÍTICO: Verificar se chegou no fim da string
+    lb $t9, 0($s5)
+    beqz $t9, recarregar_transacoes_credito
+    beq $t9, '<', recarregar_transacoes_credito
+    
+    # Conta
+    move $a0, $s5
+    move $a1, $s3
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    # Valor
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 8($s3)
+    
+    # Tipo
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 12($s3)
+    
+    # Data
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 16($s3)
+    
+    # Hora (último campo - delimitador ';')
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0           # ATUALIZA $s5 para próxima transação!
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 20($s3)
+    
+    addi $s1, $s1, 1
+    j recarregar_loop_debito
+    
+    # ===== RECARREGAR TRANSAÇÕES CRÉDITO =====
+recarregar_transacoes_credito:
+    # Ler linha completa de transações
+    move $a0, $s0
+    la $a1, buffer_arquivo
+    jal ler_linha_completa
+    beqz $v0, recarregar_fechar
+    
+    # Pular "<TRC>"
+    la $s5, buffer_arquivo
+    addi $s5, $s5, 5
+    
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    la $a0, buffer_temp
+    jal atoi
+    move $s2, $v0
+    la $t0, num_transacoes_credito
+    sw $v0, 0($t0)
+    
+    li $s1, 0
+    
+recarregar_loop_credito:
+    bge $s1, $s2, recarregar_fechar
+    
+    # Calcular endereço
+    li $t0, 24
+    mul $t1, $s1, $t0
+    la $t2, transacoes_credito
+    add $s3, $t2, $t1
+    
+    # Verificar fim da string
+    lb $t9, 0($s5)
+    beqz $t9, recarregar_fechar
+    beq $t9, '<', recarregar_fechar
+    
+    # Conta
+    move $a0, $s5
+    move $a1, $s3
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    
+    # Valor
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 8($s3)
+    
+    # Tipo
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 12($s3)
+    
+    # Data
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ','
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 16($s3)
+    
+    # Hora
+    move $a0, $s5
+    la $a1, buffer_temp
+    li $a2, ';'
+    jal parsear_campo_delim
+    move $s5, $v0
+    la $a0, buffer_temp
+    jal atoi
+    sw $v0, 20($s3)
+    
+    addi $s1, $s1, 1
+    j recarregar_loop_credito
+    
+recarregar_fechar:
+    li $v0, 16
+    move $a0, $s0
+    syscall
+    
+    li $v0, 4
+    la $a0, msg_recarregar_sucesso
+    syscall
+    j recarregar_fim
+    
+recarregar_arquivo_nao_existe:
+    li $v0, 4
+    la $a0, msg_arquivo_nao_existe
+    syscall
+    j recarregar_fim
+    
+recarregar_erro_incompleto:
+recarregar_erro_formato:
+    li $v0, 4
+    la $a0, msg_recarregar_erro
+    syscall
+    
+    li $v0, 16
+    move $a0, $s0
+    syscall
+    
+recarregar_fim:
+    lw $s6, 0($sp)
+    lw $s5, 4($sp)
+    lw $s4, 8($sp)
+    lw $s3, 12($sp)
+    lw $s2, 16($sp)
+    lw $s1, 20($sp)
+    lw $s0, 24($sp)
+    lw $ra, 28($sp)
+    addi $sp, $sp, 32
+    jr $ra
+
+# ===== FUNÇÃO FORMATAR_SISTEMA (cmd_15) =====
+# Apaga todos os dados da memória
+formatar_sistema:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    # Solicitar confirmação
+    li $v0, 4
+    la $a0, msg_formatar_confirmacao
+    syscall
+    
+    # Ler resposta
+    li $v0, 8
+    la $a0, buffer_confirmar_opcao
+    li $a1, 4
+    syscall
+    
+    # Limpar newline
+    la $a0, buffer_confirmar_opcao
+    jal limpar_newline_comando
+    
+    # Verificar confirmação
+    la $t0, buffer_confirmar_opcao
+    lb $t0, 0($t0)
+    beq $t0, 'S', formatar_confirmado
+    beq $t0, 's', formatar_confirmado
+    
+    # Não confirmado
+    li $v0, 4
+    la $a0, msg_formatar_cancelado
+    syscall
+    j formatar_fim
+    
+formatar_confirmado:
+    # Zerar contadores
+    la $t0, num_clientes
+    sw $zero, 0($t0)
+    la $t0, num_transacoes_debito
+    sw $zero, 0($t0)
+    la $t0, num_transacoes_credito
+    sw $zero, 0($t0)
+    
+    # Zerar data e hora
+    la $t0, data_atual
+    sw $zero, 0($t0)
+    la $t0, hora_atual
+    sw $zero, 0($t0)
+    la $t0, tempo_ultimo_incremento
+    sw $zero, 0($t0)
+    
+    # Limpar array de clientes (marcar todos como inativos)
+    la $t0, clientes
+    li $t1, 0
+    li $t2, 50              # Máximo de clientes
+    
+formatar_loop_clientes:
+    bge $t1, $t2, formatar_sucesso
+    
+    mul $t3, $t1, 128
+    add $t4, $t0, $t3
+    sw $zero, 84($t4)       # Status = 0 (inativo)
+    
+    addi $t1, $t1, 1
+    j formatar_loop_clientes
+    
+formatar_sucesso:
+    li $v0, 4
+    la $a0, msg_formatar_sucesso
+    syscall
+    
+formatar_fim:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+# ===== FUNÇÕES AUXILIARES DE LEITURA =====
+
+# Lê uma linha do arquivo como string
+# $a0 = file descriptor, $a1 = buffer destino
 
 parse_campo:
  move $t0, $a0
@@ -2799,28 +3584,45 @@ parse_campo_nome:
   move $v0, $t2
   jr $ra
 
-##### Helper atoi (MANTIDO) #####
+##### Helper atoi - VERSÃO MELHORADA COM SUPORTE A NEGATIVOS #####
 atoi:
- li $v0, 0
- move $t0, $a0
-
- atoi_loop:
-  lb $t1, 0($t0)
-  beqz $t1, atoi_fim
-
-  blt $t1, '0', atoi_fim
-  bgt $t1, '9', atoi_fim
-
-  addi $t1, $t1, -48
-
-  mul $v0, $v0, 10
-  add $v0, $v0, $t1
-
-  addi $t0, $t0, 1
-  j atoi_loop
-
- atoi_fim:
-  jr $ra
+    addi $sp, $sp, -8
+    sw $s0, 4($sp)
+    sw $s1, 0($sp)
+    
+    li $v0, 0            # resultado = 0
+    move $t0, $a0        # ponteiro para string
+    li $s1, 1            # sinal = positivo
+    
+    # Verificar sinal negativo
+    lb $t1, 0($t0)
+    bne $t1, '-', atoi_loop
+    
+    li $s1, -1           # sinal = negativo
+    addi $t0, $t0, 1     # pula o '-'
+    
+atoi_loop:
+    lb $t1, 0($t0)
+    beqz $t1, atoi_fim
+    
+    blt $t1, '0', atoi_fim
+    bgt $t1, '9', atoi_fim
+    
+    addi $t1, $t1, -48
+    
+    mul $v0, $v0, 10
+    add $v0, $v0, $t1
+    
+    addi $t0, $t0, 1
+    j atoi_loop
+    
+atoi_fim:
+    mul $v0, $v0, $s1    # aplica o sinal
+    
+    lw $s1, 0($sp)
+    lw $s0, 4($sp)
+    addi $sp, $sp, 8
+    jr $ra
   
 ##### FUNCAO Print Moeda (CORRIGIDA) #####
 # $a0 = valor em centavos (Entrada)
@@ -2922,4 +3724,285 @@ strcpy:
     fim_strcpy:
         jr $ra
 
+# ===== FUNÇÕES AUXILIARES DE I/O ROBUSTAS =====
 
+# Lê campo delimitado até encontrar delimitador ou EOF
+# Entrada: $a0=fd, $a1=buffer_destino, $a2=delimitador, $a3=max_chars
+# Saída: $v0=1(sucesso) ou 0(EOF/error)
+
+
+# Lê 1 byte do arquivo
+# Entrada: $a0=fd, $a1=buffer
+# Saída: $v0=1(sucesso) ou 0(EOF)
+ler_byte:
+    li $v0, 14
+    li $a2, 1
+    syscall
+    jr $ra
+
+# Parseia campo separado por ponto e vírgula
+# Entrada: $a0=string_fonte, $a1=buffer_destino
+# Saída: $v0=próximo campo
+
+    
+parse_pv_loop:
+    lb $t2, 0($t0)
+    beqz $t2, parse_pv_fim
+    beq $t2, ';', parse_pv_delimitador
+    beq $t2, '\n', parse_pv_fim
+    beq $t2, '\r', parse_pv_fim
+    
+    sb $t2, 0($t1)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j parse_pv_loop
+    
+parse_pv_delimitador:
+    addi $t0, $t0, 1
+    
+parse_pv_fim:
+    sb $zero, 0($t1)
+    move $v0, $t0
+    jr $ra
+
+
+
+
+
+
+    
+# ===== FUNÇÕES AUXILIARES DE ESCRITA CORRIGIDAS =====
+
+# Escreve string no arquivo (VERSÃO SEGURA)
+# Entrada: $a0 = file descriptor, $a1 = ponteiro para string
+escrever_string:
+    addi $sp, $sp, -20
+    sw $ra, 16($sp)
+    sw $s0, 12($sp)
+    sw $s1, 8($sp)
+    sw $s2, 4($sp)
+    sw $s3, 0($sp)
+    
+    move $s0, $a0        # fd
+    move $s1, $a1        # string
+    
+    # Calcular comprimento
+    move $s2, $s1
+    li $s3, 0
+    
+calc_tamanho_str_novo:
+    lb $t0, 0($s2)
+    beqz $t0, fim_calc_tamanho_str_novo
+    addi $s2, $s2, 1
+    addi $s3, $s3, 1
+    j calc_tamanho_str_novo
+    
+fim_calc_tamanho_str_novo:
+    # Escrever no arquivo
+    li $v0, 15
+    move $a0, $s0
+    move $a1, $s1
+    move $a2, $s3
+    syscall
+    
+    lw $s3, 0($sp)
+    lw $s2, 4($sp)
+    lw $s1, 8($sp)
+    lw $s0, 12($sp)
+    lw $ra, 16($sp)
+    addi $sp, $sp, 20
+    jr $ra
+
+# Converte inteiro para string (VERSÃO SEGURA)
+# Entrada: $a0 = inteiro, $a1 = buffer destino
+inteiro_para_string_seguro:
+    addi $sp, $sp, -20
+    sw $ra, 16($sp)
+    sw $s0, 12($sp)
+    sw $s1, 8($sp)
+    sw $s2, 4($sp)
+    sw $s3, 0($sp)
+    
+    move $s0, $a0        # valor
+    move $s1, $a1        # buffer
+    move $s2, $a1        # guarda início do buffer
+    
+    # Verificar se é negativo
+    bgez $s0, int_str_pos_novo
+    
+    li $t0, '-'
+    sb $t0, 0($s1)
+    addi $s1, $s1, 1
+    sub $s0, $zero, $s0
+    
+int_str_pos_novo:
+    # Processar dígitos (versão iterativa simples)
+    move $s3, $s1        # posição atual
+    
+    # Caso especial: zero
+    bnez $s0, int_str_nao_zero_novo
+    li $t0, '0'
+    sb $t0, 0($s3)
+    addi $s3, $s3, 1
+    sb $zero, 0($s3)
+    j int_str_fim_novo
+    
+int_str_nao_zero_novo:
+    # Extrair dígitos (ordem reversa)
+    move $t1, $s0
+    
+int_str_extrai_loop_novo:
+    beqz $t1, int_str_reverte_novo
+    li $t2, 10
+    div $t1, $t2
+    mflo $t1             # quociente
+    mfhi $t3             # resto (dígito)
+    addi $t3, $t3, 48    # ASCII
+    sb $t3, 0($s3)
+    addi $s3, $s3, 1
+    j int_str_extrai_loop_novo
+    
+int_str_reverte_novo:
+    sb $zero, 0($s3)     # null terminator
+    
+    # Reverter string de dígitos
+    move $t0, $s1        # início
+    addi $t1, $s3, -1    # fim
+    
+int_str_rev_loop_novo:
+    bge $t0, $t1, int_str_fim_novo
+    lb $t2, 0($t0)
+    lb $t3, 0($t1)
+    sb $t3, 0($t0)
+    sb $t2, 0($t1)
+    addi $t0, $t0, 1
+    addi $t1, $t1, -1
+    j int_str_rev_loop_novo
+    
+int_str_fim_novo:
+    lw $s3, 0($sp)
+    lw $s2, 4($sp)
+    lw $s1, 8($sp)
+    lw $s0, 12($sp)
+    lw $ra, 16($sp)
+    addi $sp, $sp, 20
+    jr $ra
+
+# Escreve inteiro no arquivo (VERSÃO SEGURA)
+escrever_inteiro:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $s0, 8($sp)
+    sw $s1, 4($sp)
+    sw $s2, 0($sp)
+    
+    move $s0, $a0        # fd
+    move $s1, $a1        # valor
+    
+    # Usar buffer temporário na pilha (64 bytes)
+    addi $sp, $sp, -64
+    move $s2, $sp
+    
+    # Converter inteiro para string
+    move $a0, $s1
+    move $a1, $s2
+    jal inteiro_para_string_seguro
+    
+    # Escrever string
+    move $a0, $s0
+    move $a1, $s2
+    jal escrever_string
+    
+    # Liberar buffer temporário
+    addi $sp, $sp, 64
+    
+    lw $s2, 0($sp)
+    lw $s1, 4($sp)
+    lw $s0, 8($sp)
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr $ra
+
+# Escreve delimitador
+escrever_delimitador:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $s0, 8($sp)
+    sw $s1, 4($sp)
+    sw $s2, 0($sp)
+    
+    move $s0, $a0        # fd
+    move $s1, $a1        # char
+    
+    # Usar buffer na pilha
+    addi $sp, $sp, -4
+    sb $s1, 0($sp)
+    sb $zero, 1($sp)
+    
+    # Escrever
+    li $v0, 15
+    move $a0, $s0
+    move $a1, $sp
+    li $a2, 1
+    syscall
+    
+    addi $sp, $sp, 4
+    
+    lw $s2, 0($sp)
+    lw $s1, 4($sp)
+    lw $s0, 8($sp)
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr $ra
+
+# Escreve campo string + delimitador
+escrever_campo_string:
+    addi $sp, $sp, -12
+    sw $ra, 8($sp)
+    sw $s0, 4($sp)
+    sw $s1, 0($sp)
+    
+    move $s0, $a0
+    move $s1, $a1
+    
+    move $a0, $s0
+    move $a1, $s1
+    jal escrever_string
+    
+    move $a0, $s0
+    li $a1, ';'
+    jal escrever_delimitador
+    
+    lw $s1, 0($sp)
+    lw $s0, 4($sp)
+    lw $ra, 8($sp)
+    addi $sp, $sp, 12
+    jr $ra
+
+# Escreve campo inteiro + delimitador
+escrever_campo_inteiro:
+    addi $sp, $sp, -12
+    sw $ra, 8($sp)
+    sw $s0, 4($sp)
+    sw $s1, 0($sp)
+    
+    move $s0, $a0
+    move $s1, $a1
+    
+    move $a0, $s0
+    move $a1, $s1
+    jal escrever_inteiro
+    
+    move $a0, $s0
+    li $a1, ';'
+    jal escrever_delimitador
+    
+    lw $s1, 0($sp)
+    lw $s0, 4($sp)
+    lw $ra, 8($sp)
+    addi $sp, $sp, 12
+    jr $ra
+    
+    
+string_para_inteiro:
+    j atoi
