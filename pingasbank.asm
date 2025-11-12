@@ -43,6 +43,29 @@
     transacoes_debito: .space 24000      # 1000 transacoes * 24 bytes cada
     num_transacoes_debito: .word 0
     max_transacoes_debito: .word 1000
+    
+        # # # ESTRUTURA DE TRANSAÇÕES DE CRÉDITO # # #
+    # Cada transação ocupará 24 bytes:
+    # Offset 0: Conta (8 bytes) - Conta do cliente
+    # Offset 8: Valor (4 bytes) - Valor em centavos
+    # Offset 12: Tipo (4 bytes) - 4=Pagamento, 5=Uso Crédito, 6=Juros
+    # Offset 16: Data (4 bytes) - AAAAMMDD
+    # Offset 20: Hora (4 bytes) - HHMMSS
+    
+    transacoes_credito: .space 1200      # 50 transações * 24 bytes (máx. por cliente)
+    num_transacoes_credito: .word 0
+    max_transacoes_credito: .word 50
+
+    ##### Mensagens de Crédito #####
+    msg_credito_extrato_cabecalho: .asciiz "\n=== EXTRATO DE CRÉDITO da conta "
+    msg_extrato_credito_tipo4: .asciiz "\nTipo: PAGAMENTO FATURA"
+    msg_extrato_credito_tipo5: .asciiz "\nTipo: USO CRÉDITO (Transferência)"
+    msg_extrato_credito_tipo6: .asciiz "\nTipo: JUROS"
+    msg_str_credito_limite: .asciiz "\nLimite de Crédito: "
+    msg_str_credito_disponivel: .asciiz "\nCrédito Disponível: "
+    
+    msg_pagamento_sucesso: .asciiz "\nPagamento realizado com sucesso\n"
+    msg_valor_maior_que_divida: .asciiz "\nFalha: valor maior que a dívida\n"
 
     #####  Mensagens do sistema #####
     msg_sucesso_cadastro: .asciiz "\nCliente cadastrado com sucesso. Numero da conta "
@@ -213,7 +236,22 @@ main:
     la $a0, buffer_temp
     la $a1, str_pagar_fatura
     jal strcmp
-    beqz $v0, handle_em_construcao
+    beqz $v0, handle_pagar_fatura 
+    
+    la $a0, buffer_temp
+    la $a1, str_sacar
+    jal strcmp
+    beqz $v0, handle_sacar
+    
+    la $a0, buffer_temp
+    la $a1, str_depositar
+    jal strcmp
+    beqz $v0, handle_depositar
+    
+    la $a0, buffer_temp
+    la $a1, str_data_hora
+    jal strcmp
+    beqz $v0, handle_data_hora
 
     # --- Comandos "Em Construï¿½ï¿½o" --- #
 
@@ -228,31 +266,20 @@ main:
     la $a0, buffer_temp
     la $a1, str_credito_extrato
     jal strcmp
-    beqz $v0, handle_em_construcao
-
-
+    beqz $v0, handle_credito_extrato
+    
     
 
 
-    la $a0, buffer_temp
-    la $a1, str_sacar
-    jal strcmp
-    beqz $v0, handle_sacar
 
-    la $a0, buffer_temp
-    la $a1, str_depositar
-    jal strcmp
-    beqz $v0, handle_depositar
+    
 
     la $a0, buffer_temp
     la $a1, str_alterar_limite
     jal strcmp
     beqz $v0, handle_em_construcao
 
-    la $a0, buffer_temp
-    la $a1, str_data_hora
-    jal strcmp
-    beqz $v0, handle_data_hora
+    
 
     la $a0, buffer_temp
     la $a1, str_salvar
@@ -279,6 +306,562 @@ main:
 
 # --- Handlers de Comandos ---
 
+
+# Função para imprimir número com dois dígitos (com zero à esquerda se < 10)
+# Entrada: $a0 = número
+print_dois_digitos:
+    blt $a0, 10, print_dd_zero
+    li $v0, 1
+    syscall
+    jr $ra
+    
+print_dd_zero:
+    move $t0, $a0           # SALVA o valor original
+    li $v0, 4
+    la $a0, msg_str_zero  # Imprime "0"
+    syscall
+    li $v0, 1
+    move $a0, $t0         # RESTAURA o valor original
+    syscall
+    jr $ra
+
+# FUNCAO Handler para credito_extrato (cmd_4)
+# Comando: credito_extrato-<conta>
+# Exibe extrato de crédito com todas transações, limites e datas (R5)
+handle_credito_extrato:
+    addi $sp, $sp, -20
+    sw $ra, 16($sp)
+    sw $s0, 12($sp)         # ponteiro cliente
+    sw $s1, 8($sp)          # contador i
+    sw $s2, 4($sp)          # limite transações
+    sw $s3, 0($sp)          # ponteiro string conta
+
+    # 1. Parsear CONTA
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+
+    # 2. Buscar cliente
+    la $a0, buffer_temp
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, credito_extrato_falha_cliente
+    move $s0, $v0
+
+    # 3. Imprimir CABEÇALHO com informações atuais
+    li $v0, 4
+    la $a0, msg_credito_extrato_cabecalho
+    syscall
+    la $a0, buffer_temp
+    syscall
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # 4. Imprimir LIMITES DE CRÉDITO
+    li $v0, 4
+    la $a0, msg_str_credito_limite
+    syscall
+    lw $a0, 76($s0)
+    jal print_moeda
+
+    li $v0, 4
+    la $a0, msg_str_credito_usado
+    syscall
+    lw $a0, 80($s0)
+    jal print_moeda
+
+    li $v0, 4
+    la $a0, msg_str_credito_disponivel
+    syscall
+    lw $t0, 76($s0)
+    lw $t1, 80($s0)
+    sub $a0, $t0, $t1
+    jal print_moeda
+
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # 5. Preparar loop de transações
+    la $s3, 12($s0)         # ponteiro para string da conta cliente
+    li $s1, 0               # i = 0
+    la $t0, num_transacoes_credito
+    lw $s2, 0($t0)          # limite = num_transacoes_credito
+
+credito_extrato_loop:
+    bge $s1, $s2, credito_extrato_fim
+
+    # Calcular endereço da transação[i]
+    li $t0, 24
+    mul $t1, $s1, $t0
+    la $t2, transacoes_credito
+    add $t2, $t2, $t1
+
+    # Verificar se transação pertence a esta conta
+    move $a0, $s3
+    move $a1, $t2
+    jal strcmp
+    bnez $v0, credito_extrato_proxima
+
+    # Imprimir TIPO da transação
+    lw $t3, 12($t2)         # tipo
+    beq $t3, 4, credito_tipo4
+    beq $t3, 5, credito_tipo5
+    beq $t3, 6, credito_tipo6
+    j credito_imprimir_valor
+
+credito_tipo4:
+    li $v0, 4
+    la $a0, msg_extrato_credito_tipo4
+    syscall
+    j credito_imprimir_valor
+
+credito_tipo5:
+    li $v0, 4
+    la $a0, msg_extrato_credito_tipo5
+    syscall
+    j credito_imprimir_valor
+
+credito_tipo6:
+    li $v0, 4
+    la $a0, msg_extrato_credito_tipo6
+    syscall
+
+credito_imprimir_valor:
+    # Imprimir VALOR
+    li $v0, 4
+    la $a0, msg_extrato_valor
+    syscall
+    lw $a0, 8($t2)          # valor
+    jal print_moeda
+
+    # Imprimir DATA/HORA formatada
+    li $v0, 4
+    la $a0, msg_data_hora_prefix
+    syscall
+
+    lw $t5, 16($t2)         # data AAAAMMDD
+    lw $t6, 20($t2)         # hora HHMMSS
+
+    # === FORMATAR DATA: DD/MM/AAAA ===
+    li $t7, 1000000
+    div $t5, $t7
+    mflo $t4                # Dia
+    mfhi $t8                # Resto MMAAAA
+
+    li $t7, 10000
+    div $t8, $t7
+    mflo $t3                # Mes
+    mfhi $t9                # Ano
+
+    li $v0, 1
+    move $a0, $t4
+    syscall
+    li $v0, 4
+    la $a0, msg_barra_data
+    syscall
+    li $v0, 1
+    move $a0, $t3
+    syscall
+    li $v0, 4
+    la $a0, msg_barra_data
+    syscall
+    li $v0, 1
+    move $a0, $t9
+    syscall
+
+    # Espaço e hora
+    li $v0, 4
+    la $a0, msg_espaco
+    syscall
+
+     # Extrair HH (hora)
+    li $t7, 10000
+    div $t6, $t7            # Divide HHMMSS por 10000
+    mflo $t6                # Hora
+    mfhi $t7                # Resto = MMSS
+
+    # Extrair MM (minutos) e SS (segundos)
+    li $t8, 100
+    div $t7, $t8            # Divide MMSS por 100
+    mflo $t8                # Minutos
+    mfhi $t9                # Segundos
+
+    # Imprimir formato HH:MM:SS com zeros à esquerda
+    move $a0, $t6           # Hora
+    jal print_dois_digitos
+
+    li $v0, 4
+    la $a0, msg_dois_pontos # ":"
+    syscall
+
+    move $a0, $t8           # Minutos
+    jal print_dois_digitos
+
+    li $v0, 4
+    la $a0, msg_dois_pontos # ":"
+    syscall
+
+    move $a0, $t9           # Segundos
+    jal print_dois_digitos
+
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+credito_extrato_proxima:
+    addi $s1, $s1, 1
+    j credito_extrato_loop
+
+credito_extrato_falha_cliente:
+    li $v0, 4
+    la $a0, msg_cliente_inexistente
+    syscall
+
+credito_extrato_fim:
+    # Nova linha final
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    lw $s3, 0($sp)
+    lw $s2, 4($sp)
+    lw $s1, 8($sp)
+    lw $s0, 12($sp)
+    lw $ra, 16($sp)
+    addi $sp, $sp, 20
+    j cli_loop
+
+# FUNCAO Handler para pagar_fatura (cmd_7)
+# Comando: pagar_fatura-<conta>-<valor>-<metodo>
+# <metodo>: S = saldo, E = externo
+# Registra transação de crédito (tipo 4) com data/hora
+handle_pagar_fatura:
+    addi $sp, $sp, -32
+    sw $ra, 28($sp)
+    sw $s0, 24($sp)         # ponteiro cliente
+    sw $s1, 20($sp)         # valor
+    sw $s2, 16($sp)         # metodo (1=S, 0=E)
+    sw $s3, 12($sp)         # data
+    sw $s4, 8($sp)          # hora
+    sw $t0, 4($sp)          # temporário
+    sw $t1, 0($sp)          # temporário
+
+    # 1. Parsear CONTA
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+    move $s1, $v0
+
+    # 2. Parsear VALOR
+    la $a0, buffer_args
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+    move $s1, $v0
+
+    # 3. Parsear MÉTODO (S ou E)
+    la $a0, buffer_conta_completa
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+
+    # 4. Converter valor
+    la $a0, buffer_args
+    jal atoi
+    move $s1, $v0
+
+    # 5. Verificar método
+    la $t0, buffer_conta_completa
+    lb $t0, 0($t0)
+    li $t1, 'S'
+    beq $t0, $t1, metodo_saldo_ok
+    li $t1, 's'
+    beq $t0, $t1, metodo_saldo_ok
+    li $t1, 'E'
+    beq $t0, $t1, metodo_externo_ok
+    li $t1, 'e'
+    beq $t0, $t1, metodo_externo_ok
+    
+    # Método inválido
+    li $v0, 4
+    la $a0, msg_comando_invalido
+    syscall
+    j pagar_fatura_fim
+
+metodo_saldo_ok:
+    li $s2, 1
+    j buscar_cliente_fatura
+metodo_externo_ok:
+    li $s2, 0
+
+buscar_cliente_fatura:
+    # 6. Buscar cliente
+    la $a0, buffer_temp
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, pagar_falha_cliente
+    move $s0, $v0
+
+    # 7. Verificar se valor <= crédito usado
+    lw $t0, 80($s0)         # Crédito usado
+    blt $t0, $s1, pagar_falha_valor_maior_que_divida
+
+    # 8. Se método=S, verificar saldo suficiente
+    beqz $s2, pagar_sem_verificar_saldo
+    lw $t0, 72($s0)         # Saldo
+    blt $t0, $s1, pagar_falha_saldo_insuficiente
+
+    # 9. Método S: Reduzir saldo
+    sub $t0, $t0, $s1
+    sw $t0, 72($s0)
+
+pagar_sem_verificar_saldo:
+    # 10. Reduzir crédito usado
+    lw $t0, 80($s0)
+    sub $t0, $t0, $s1
+    sw $t0, 80($s0)
+
+    # 11. OBTER DATA/HORA
+    jal obter_data_hora_atual
+    move $s3, $v0
+    move $s4, $v1
+
+    # 12. Registrar TRANSAÇÃO DE CRÉDITO (tipo 4 = Pagamento)
+    la $a0, 12($s0)         # Conta
+    sub $a1, $zero, $s1     # Valor negativo (reduz dívida)
+    li $a2, 4               # Tipo 4: Pagamento Fatura
+    move $a3, $s3           # Data
+    
+    addi $sp, $sp, -4
+    sw $s4, 0($sp)
+    jal registrar_transacao_credito
+    addi $sp, $sp, 4
+
+    # 13. Sucesso
+    li $v0, 4
+    la $a0, msg_pagamento_sucesso
+    syscall
+    j pagar_fatura_fim
+
+pagar_falha_cliente:
+    li $v0, 4
+    la $a0, msg_cliente_inexistente
+    syscall
+    j pagar_fatura_fim
+
+pagar_falha_valor_maior_que_divida:
+    li $v0, 4
+    la $a0, msg_valor_maior_que_divida
+    syscall
+    j pagar_fatura_fim
+
+pagar_falha_saldo_insuficiente:
+    li $v0, 4
+    la $a0, msg_saldo_insuficiente
+    syscall
+
+pagar_fatura_fim:
+    lw $t1, 0($sp)
+    lw $t0, 4($sp)
+    lw $s4, 8($sp)
+    lw $s3, 12($sp)
+    lw $s2, 16($sp)
+    lw $s1, 20($sp)
+    lw $s0, 24($sp)
+    lw $ra, 28($sp)
+    addi $sp, $sp, 32
+    j cli_loop
+
+# FUNCAO Handler para transferir_credito
+# Comando: transferir_credito-<conta_destino>-<conta_origem>-<valor>
+# Transfere crédito do limite da origem para o saldo da destino
+handle_transferir_credito:
+    addi $sp, $sp, -24
+    sw $ra, 20($sp)         
+    sw $s0, 16($sp)         # $s0 = ponteiro cliente destino
+    sw $s1, 12($sp)         # $s1 = ponteiro cliente origem
+    sw $s2, 8($sp)          # $s2 = valor da transferência
+    sw $s3, 4($sp)          # $s3 = data
+    sw $s4, 0($sp)          # $s4 = hora
+
+    # 1. Parsear CONTA_DESTINO
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+    move $s1, $v0
+
+    # 2. Parsear CONTA_ORIGEM
+    la $a0, buffer_args
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+    move $s1, $v0
+
+    # 3. Parsear VALOR
+    la $a0, buffer_conta_completa
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+
+    # 4. Converter VALOR string para inteiro
+    la $a0, buffer_conta_completa
+    jal atoi
+    move $s2, $v0
+
+    # 5. Buscar CONTA_DESTINO
+    la $a0, buffer_temp
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, transferir_cred_falha_destino
+    move $s0, $v0
+
+    # 6. Buscar CONTA_ORIGEM
+    la $a0, buffer_args
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, transferir_cred_falha_origem
+    move $s1, $v0
+
+    # 7. Verificar crédito disponível na conta origem
+    lw $t0, 76($s1)         # Limite de crédito
+    lw $t1, 80($s1)         # Crédito usado
+    sub $t2, $t0, $t1       # Crédito disponível
+    blt $t2, $s2, transferir_cred_falha_limite
+
+    # 8. Atualizar SALDO da conta destino
+    lw $t3, 72($s0)
+    add $t3, $t3, $s2
+    sw $t3, 72($s0)
+
+    # 9. Atualizar CREDITO USADO da conta origem
+    add $t1, $t1, $s2
+    sw $t1, 80($s1)
+
+    # 10. Obter data e hora atuais
+    jal obter_data_hora_atual
+    move $s3, $v0           # Data
+    move $s4, $v1           # Hora
+
+    # 11. Registrar transação na conta DESTINO (Tipo 1 = Depósito no débito)
+    la $a0, 12($s0)
+    move $a1, $s2           # Valor positivo
+    li $a2, 1               # Tipo 1: Depósito
+    move $a3, $s3
+    addi $sp, $sp, -4
+    sw $s4, 0($sp)
+    jal registrar_transacao_debito
+    addi $sp, $sp, 4
+
+    # 12. Registrar transação na conta ORIGEM (Tipo 5 = Uso Crédito no crédito_extrato)
+    la $a0, 12($s1)
+    move $a1, $s2           # Valor positivo (uso de crédito)
+    li $a2, 5               # Tipo 5: Uso Crédito (Transferência)
+    move $a3, $s3
+    addi $sp, $sp, -4
+    sw $s4, 0($sp)
+    jal registrar_transacao_credito  # <-- MUDANÇA AQUI: usar registrar_transacao_credito
+    addi $sp, $sp, 4
+
+    # 13. Mensagem de sucesso
+    li $v0, 4
+    la $a0, msg_transferencia_sucesso
+    syscall
+
+    j transferir_cred_fim
+
+transferir_cred_falha_origem:
+    li $v0, 4
+    la $a0, msg_conta_origem_inexistente
+    syscall
+    j transferir_cred_fim
+
+transferir_cred_falha_destino:
+    li $v0, 4
+    la $a0, msg_conta_destino_inexistente
+    syscall
+    j transferir_cred_fim
+
+transferir_cred_falha_limite:
+    li $v0, 4
+    la $a0, msg_limite_insuficiente
+    syscall
+
+transferir_cred_fim:
+    lw $s4, 0($sp)
+    lw $s3, 4($sp)
+    lw $s2, 8($sp)
+    lw $s1, 12($sp)
+    lw $s0, 16($sp)
+    lw $ra, 20($sp)
+    addi $sp, $sp, 24
+    j cli_loop
+    
+# FUNCAO registrar_transacao_credito
+# Entrada: $a0 = conta, $a1 = valor, $a2 = tipo, $a3 = data
+#            pilha[0] = hora (argumento extra)
+# Registra transação de crédito com sobrescrita circular (R3)
+registrar_transacao_credito:
+    addi $sp, $sp, -28
+    sw $ra, 24($sp)
+    sw $s0, 20($sp)
+    sw $s1, 16($sp)
+    sw $s2, 12($sp)
+    sw $s3, 8($sp)
+    sw $s4, 4($sp)
+    sw $t9, 0($sp)
+
+    move $s0, $a0           # Conta
+    move $s1, $a1           # Valor
+    move $s2, $a2           # Tipo
+    move $s3, $a3           # Data
+    lw $s4, 28($sp)         # Hora da pilha
+
+    # Verifica limite (máx. 50 transações)
+    la $s5, num_transacoes_credito
+    lw $t1, 0($s5)
+    la $t2, max_transacoes_credito
+    lw $t2, 0($t2)
+    
+    # Se atingiu limite, sobrescreve transações antigas (circular buffer)
+    blt $t1, $t2, registrar_credito_normal
+    li $t1, 0               # Reseta para posição 0 (sobrescreve mais antiga)
+
+registrar_credito_normal:
+    # Calcula offset (24 bytes por transação)
+    li $t3, 24
+    mul $t4, $t1, $t3
+    la $t5, transacoes_credito
+    add $t5, $t5, $t4
+
+    # Salva dados da transação
+    move $a0, $t5
+    move $a1, $s0
+    jal strcpy              # Copia conta (8 bytes)
+    sw $s1, 8($t5)          # Valor
+    sw $s2, 12($t5)         # Tipo
+    sw $s3, 16($t5)         # Data
+    sw $s4, 20($t5)         # Hora
+
+    # Incrementa contador circularmente
+    addi $t1, $t1, 1
+    blt $t1, $t2, salvar_contador_credito
+    li $t1, 0               # Volta ao início do buffer
+
+salvar_contador_credito:
+    sw $t1, 0($s5)
+
+fim_registrar_transacao_credito:
+    lw $t9, 0($sp)
+    lw $s4, 4($sp)
+    lw $s3, 8($sp)
+    lw $s2, 12($sp)
+    lw $s1, 16($sp)
+    lw $s0, 20($sp)
+    lw $ra, 24($sp)
+    addi $sp, $sp, 28
+    jr $ra
+
 ##### FUNCAO Handler para data_hora #####
 # Comando: data_hora-<option1>-<option2>
 # <option1> = DDMMAAAA, <option2> = HHMMSS
@@ -303,35 +886,35 @@ handle_data_hora:
     jal parse_campo
 
     # 3. Converter strings para inteiros
-    la $a0, buffer_temp
-    jal atoi
-    move $s0, $v0           # $s0 = data inteira
+	la $a0, buffer_temp
+	jal atoi
+	move $s0, $v0           # $s0 = data inteira
 
-    la $a0, buffer_args
-    jal atoi
-    move $s1, $v0           # $s1 = hora inteira
+	la $a0, buffer_args
+	jal atoi
+	move $s1, $v0           # $s1 = hora inteira
 
-    # 4. Validar data
-    move $a0, $s0
-    jal validar_data
-    beqz $v0, data_hora_invalida
+	# 4. Validar data
+	move $a0, $s0
+	jal validar_data
+	beqz $v0, data_hora_invalida
 
-    # 5. Validar hora
-    move $a0, $s1
-    jal validar_hora
-    beqz $v0, hora_hora_invalida
+	# 5. Validar hora
+	move $a0, $s1
+	jal validar_hora
+	beqz $v0, hora_hora_invalida
 
-    # 6. Salvar data e hora
-    la $t0, data_atual
-    sw $s0, 0($t0)
-    la $t0, hora_atual
-    sw $s1, 0($t0)
+# 6. Salvar data e hora
+la $t0, data_atual
+sw $s0, 0($t0)
+la $t0, hora_atual
+sw $s1, 0($t0)          # SALVA A HORA CONFIGURADA
 
-    # 7. Inicializar tempo_ultimo_incremento com syscall 30
-    li $v0, 30              # Syscall 30: get time in milliseconds
-    syscall
-    la $t0, tempo_ultimo_incremento
-    sw $a0, 0($t0)
+# 7. Inicializar tempo_ultimo_incremento com syscall 30
+li $v0, 30              # Syscall 30: get time in milliseconds
+syscall
+la $t0, tempo_ultimo_incremento
+sw $a0, 0($t0)          # $a0 contém os milissegundos atuais
 
     # Mensagem de sucesso
     li $v0, 4
@@ -550,112 +1133,7 @@ data_hora_nao_configurada:
     li $v1, 0
     j obter_data_hora_fim
 
-# FUNCAO Handler para transferir_credito
-# Comando: transferir_credito-<conta_destino>-<conta_origem>-<valor>
-# Transfere crédito do limite da origem para o saldo da destino
-handle_transferir_credito:
-    addi $sp, $sp, -16      # Aloca espaço na pilha
-    sw $ra, 12($sp)         # Salva endereço de retorno
-    sw $s0, 8($sp)          # $s0 = ponteiro cliente destino
-    sw $s1, 4($sp)          # $s1 = ponteiro cliente origem
-    sw $s2, 0($sp)          # $s2 = valor da transferência
 
-    # 1. Parsear CONTA_DESTINO (option1)
-    la $a0, buffer_temp     # Destino para string da conta destino
-    li $a1, '-'             # Delimitador
-    move $a2, $s1           # $s1 vem do main com os argumentos
-    jal parse_campo
-    move $s1, $v0           # Atualiza ponteiro para próximo argumento
-
-    # 2. Parsear CONTA_ORIGEM (option2)
-    la $a0, buffer_args     # Destino para string da conta origem
-    li $a1, '-'             # Delimitador
-    move $a2, $s1           # Fonte = resto dos argumentos
-    jal parse_campo
-    move $s1, $v0           # Atualiza ponteiro para próximo argumento
-
-    # 3. Parsear VALOR (option3)
-    la $a0, buffer_conta_completa # Destino para string do valor
-    li $a1, '-'             # Delimitador (último campo)
-    move $a2, $s1           # Fonte = resto dos argumentos
-    jal parse_campo
-
-    # 4. Converter VALOR string para inteiro
-    la $a0, buffer_conta_completa
-    jal atoi
-    move $s2, $v0           # Salva valor numérico em $s2
-
-    # 5. Buscar CONTA_DESTINO
-    la $a0, buffer_temp     # Passa string da conta destino
-    jal buscar_cliente_por_conta_completa
-    beqz $v0, transferir_cred_falha_destino  # Conta destino não existe
-    move $s0, $v0           # Salva ponteiro do cliente destino
-
-    # 6. Buscar CONTA_ORIGEM
-    la $a0, buffer_args     # Passa string da conta origem
-    jal buscar_cliente_por_conta_completa
-    beqz $v0, transferir_cred_falha_origem   # Conta origem não existe
-    move $s1, $v0           # Salva ponteiro do cliente origem
-
-    # 7. Verificar crédito disponível na conta origem
-    lw $t0, 76($s1)         # $t0 = Limite de crédito da origem
-    lw $t1, 80($s1)         # $t1 = Crédito usado da origem
-    sub $t2, $t0, $t1       # $t2 = Crédito disponível
-    blt $t2, $s2, transferir_cred_falha_limite  # Se disponível < valor, erro
-
-    # 8. Atualizar SALDO da conta destino (crédito vira saldo)
-    lw $t3, 72($s0)         # $t3 = Saldo atual da destino
-    add $t3, $t3, $s2       # $t3 = Saldo + valor transferido
-    sw $t3, 72($s0)         # Salva novo saldo
-
-    # 9. Atualizar CREDITO USADO da conta origem
-    add $t1, $t1, $s2       # $t1 = Crédito usado + valor transferido
-    sw $t1, 80($s1)         # Salva novo crédito usado
-
-    # 10. Registrar transação na conta destino (Tipo 1 = Depósito)
-    la $a0, 12($s0)         # $a0 = Ponteiro da conta destino
-    move $a1, $s2           # $a1 = Valor positivo
-    li $a2, 1               # $a2 = Tipo 1 (Depósito)
-    jal registrar_transacao_debito
-
-    # 11. Registrar transação na conta origem (Tipo 3 = Transferência)
-    la $a0, 12($s1)         # $a0 = Ponteiro da conta origem
-    sub $a1, $zero, $s2     # $a1 = Valor negativo
-    li $a2, 3               # $a2 = Tipo 3 (Transferência)
-    jal registrar_transacao_debito
-
-    # 12. Imprimir mensagem de sucesso
-    li $v0, 4
-    la $a0, msg_transferencia_sucesso
-    syscall
-
-    j transferir_cred_fim
-
-transferir_cred_falha_origem:
-    li $v0, 4
-    la $a0, msg_conta_origem_inexistente
-    syscall
-    j transferir_cred_fim
-
-transferir_cred_falha_destino:
-    li $v0, 4
-    la $a0, msg_conta_destino_inexistente
-    syscall
-    j transferir_cred_fim
-
-transferir_cred_falha_limite:
-    li $v0, 4
-    la $a0, msg_limite_insuficiente
-    syscall
-    # Continua para finalização
-
-transferir_cred_fim:
-    lw $s2, 0($sp)
-    lw $s1, 4($sp)
-    lw $s0, 8($sp)
-    lw $ra, 12($sp)
-    addi $sp, $sp, 16
-    j cli_loop
 
 handle_conta_format:
     addi $sp, $sp, -16          # Aloca espaço na pilha
@@ -1499,25 +1977,22 @@ mflo $t8                # Minutos
 mfhi $t9                # Segundos
 
 # Imprimir formato HH:MM:SS
-li $v0, 1
 move $a0, $t6           # Hora
-syscall
+jal print_dois_digitos
 
 li $v0, 4
 la $a0, msg_dois_pontos # ":"
 syscall
 
-li $v0, 1
 move $a0, $t8           # Minutos
-syscall
+jal print_dois_digitos
 
 li $v0, 4
 la $a0, msg_dois_pontos # ":"
 syscall
 
-li $v0, 1
 move $a0, $t9           # Segundos
-syscall
+jal print_dois_digitos
 
 # Nova linha
 li $v0, 4
