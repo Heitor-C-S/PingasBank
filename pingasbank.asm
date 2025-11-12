@@ -164,6 +164,11 @@
     msg_data_hora_nao_configurada: .asciiz "\nErro: Data e hora nao configuradas\n"
     msg_extrato_data_hora: .asciiz " | Data/Hora: "
     
+    # Mensagem de alteração de limite
+    msg_limite_alterado_sucesso: .asciiz "\nLimite de credito alterado com sucesso\n"
+    
+    
+    
 .text
 .globl main
 
@@ -253,33 +258,21 @@ main:
     jal strcmp
     beqz $v0, handle_data_hora
 
+    la $a0, buffer_temp
+    la $a1, str_credito_extrato
+    jal strcmp
+    beqz $v0, handle_credito_extrato
     # --- Comandos "Em Construï¿½ï¿½o" --- #
-
-
 
     la $a0, buffer_temp
     la $a1, str_conta_fechar
     jal strcmp
     beqz $v0, handle_em_construcao
 
-
-    la $a0, buffer_temp
-    la $a1, str_credito_extrato
-    jal strcmp
-    beqz $v0, handle_credito_extrato
-    
-    
-
-
-
-    
-
-    la $a0, buffer_temp
-    la $a1, str_alterar_limite
-    jal strcmp
-    beqz $v0, handle_em_construcao
-
-    
+la $a0, buffer_temp
+la $a1, str_alterar_limite
+jal strcmp
+beqz $v0, handle_alterar_limite
 
     la $a0, buffer_temp
     la $a1, str_salvar
@@ -305,6 +298,70 @@ main:
     j cli_loop
 
 # --- Handlers de Comandos ---
+
+# FUNCAO Handler para alterar_limite (cmd_10)
+# Comando: alterar_limite-<conta>-<novo_limite>
+# Altera o limite de crédito do cliente especificado
+handle_alterar_limite:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $s0, 8($sp)          # ponteiro cliente
+    sw $s1, 4($sp)          # novo limite
+    sw $s2, 0($sp)          # temporário
+
+    # 1. Parsear CONTA
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+    move $s1, $v0
+
+    # 2. Parsear NOVO_LIMITE
+    la $a0, buffer_args
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
+
+    # 3. Converter NOVO_LIMITE para inteiro
+    la $a0, buffer_args
+    jal atoi
+    move $s1, $v0           # Salva novo limite
+
+    # 4. Buscar cliente
+    la $a0, buffer_temp
+    jal buscar_cliente_por_conta_completa
+    beqz $v0, alterar_limite_falha_cliente
+    move $s0, $v0
+
+    # 5. Atualizar limite de crédito (offset 76)
+    sw $s1, 76($s0)
+
+    # 6. Mensagem de sucesso
+    li $v0, 4
+    la $a0, msg_limite_alterado_sucesso
+    syscall
+
+    # Exibir novo limite
+    li $v0, 4
+    la $a0, msg_str_limite
+    syscall
+    move $a0, $s1
+    jal print_moeda
+
+    j alterar_limite_fim
+
+alterar_limite_falha_cliente:
+    li $v0, 4
+    la $a0, msg_cliente_inexistente
+    syscall
+
+alterar_limite_fim:
+    lw $s2, 0($sp)
+    lw $s1, 4($sp)
+    lw $s0, 8($sp)
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    j cli_loop
 
 
 # Função para imprimir número com dois dígitos (com zero à esquerda se < 10)
