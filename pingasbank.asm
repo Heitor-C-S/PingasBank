@@ -39,7 +39,7 @@
     # Offset 12: Tipo (4 bytes) - (ex: 1=Deposito, 2=Saque, 3=Transf. Debito).
     # Offset 16: Data (4 bytes) - AAAAMMDD
     # Offset 20: Hora (4 bytes) - HHMMSS
-    
+    .align 2
     transacoes_debito: .space 24000      # 1000 transacoes * 24 bytes cada
     num_transacoes_debito: .word 0
     max_transacoes_debito: .word 1000
@@ -51,7 +51,7 @@
     # Offset 12: Tipo (4 bytes) - 4=Pagamento, 5=Uso Crédito, 6=Juros
     # Offset 16: Data (4 bytes) - AAAAMMDD
     # Offset 20: Hora (4 bytes) - HHMMSS
-    
+    .align 2
     transacoes_credito: .space 1200      # 50 transações * 24 bytes (máx. por cliente)
     num_transacoes_credito: .word 0
     max_transacoes_credito: .word 50
@@ -194,6 +194,18 @@
     arquivo_marcador_trc:    .asciiz "<TRC>"
     arquivo_marcador_fim_trc: .asciiz "</TRC>"
     
+    .align 2
+    
+    # Juros
+    # Estrutura de controle de juros (um por cliente)
+    # Cada entrada: 12 bytes
+    # Offset 0: Conta (8 bytes)
+    # Offset 8: Última aplicação de juros - timestamp (4 bytes) formato AAAAMMDDHHMMSS compactado
+    ultimo_calculo_juros: .space 600  # 50 clientes * 12 bytes
+
+    # Mensagem de juros aplicados
+    msg_juros_aplicados: .asciiz "\n[SISTEMA] Juros de 1% aplicados na conta "
+    
     
     
     
@@ -300,27 +312,29 @@ main:
     jal strcmp
     beqz $v0, handle_alterar_limite
     
-    # --- Comandos "Em Construï¿½ï¿½o" --- #
-
     la $a0, buffer_temp
     la $a1, str_conta_fechar
     jal strcmp
     beqz $v0, handle_conta_fechar
-
+    
     la $a0, buffer_temp
     la $a1, str_salvar
     jal strcmp
     beqz $v0, handle_salvar 
-
+    
     la $a0, buffer_temp
     la $a1, str_recarregar
     jal strcmp
     beqz $v0, handle_recarregar
-
+    
     la $a0, buffer_temp
     la $a1, str_formatar
     jal strcmp
     beqz $v0, handle_formatar
+    
+    # --- Comandos "Em Construï¿½ï¿½o" --- #
+
+    
 
     # --- Fim dos Comandos ---
 
@@ -565,16 +579,16 @@ print_dd_zero:
     syscall
     jr $ra
 
-# FUNCAO Handler para credito_extrato (cmd_4)
-# Comando: credito_extrato-<conta>
-# Exibe extrato de crédito com todas transações, limites e datas (R5)
+# FUNCAO Handler para credito_extrato
 handle_credito_extrato:
     addi $sp, $sp, -20
     sw $ra, 16($sp)
-    sw $s0, 12($sp)         # ponteiro cliente
-    sw $s1, 8($sp)          # contador i
-    sw $s2, 4($sp)          # limite transações
-    sw $s3, 0($sp)          # ponteiro string conta
+    sw $s0, 12($sp)
+    sw $s1, 8($sp)
+    sw $s2, 4($sp)
+    sw $s3, 0($sp)
+
+    jal calcular_juros_automatico
 
     # 1. Parsear CONTA
     la $a0, buffer_temp
@@ -588,7 +602,7 @@ handle_credito_extrato:
     beqz $v0, credito_extrato_falha_cliente
     move $s0, $v0
 
-    # 3. Imprimir CABEÇALHO com informações atuais
+    # 3. Imprimir CABEÇALHO
     li $v0, 4
     la $a0, msg_credito_extrato_cabecalho
     syscall
@@ -624,10 +638,10 @@ handle_credito_extrato:
     syscall
 
     # 5. Preparar loop de transações
-    la $s3, 12($s0)         # ponteiro para string da conta cliente
-    li $s1, 0               # i = 0
+    la $s3, 12($s0)
+    li $s1, 0
     la $t0, num_transacoes_credito
-    lw $s2, 0($t0)          # limite = num_transacoes_credito
+    lw $s2, 0($t0)
 
 credito_extrato_loop:
     bge $s1, $s2, credito_extrato_fim
@@ -645,7 +659,7 @@ credito_extrato_loop:
     bnez $v0, credito_extrato_proxima
 
     # Imprimir TIPO da transação
-    lw $t3, 12($t2)         # tipo
+    lw $t3, 12($t2)
     beq $t3, 4, credito_tipo4
     beq $t3, 5, credito_tipo5
     beq $t3, 6, credito_tipo6
@@ -673,10 +687,10 @@ credito_imprimir_valor:
     li $v0, 4
     la $a0, msg_extrato_valor
     syscall
-    lw $a0, 8($t2)          # valor
+    lw $a0, 8($t2)
     jal print_moeda
 
-    # Imprimir DATA/HORA formatada
+    # Imprimir DATA/HORA
     li $v0, 4
     la $a0, msg_data_hora_prefix
     syscall
@@ -684,7 +698,7 @@ credito_imprimir_valor:
     lw $t5, 16($t2)         # data AAAAMMDD
     lw $t6, 20($t2)         # hora HHMMSS
 
-    # === FORMATAR DATA: DD/MM/AAAA ===
+    # Extrair DD/MM/AAAA
     li $t7, 1000000
     div $t5, $t7
     mflo $t4                # Dia
@@ -716,39 +730,41 @@ credito_imprimir_valor:
     la $a0, msg_espaco
     syscall
 
-     # Extrair HH (hora)
+    # Extrair HH:MM:SS
     li $t7, 10000
-    div $t6, $t7            # Divide HHMMSS por 10000
+    div $t6, $t7
     mflo $t6                # Hora
-    mfhi $t7                # Resto = MMSS
+    mfhi $t7                # Resto MMSS
 
-    # Extrair MM (minutos) e SS (segundos)
     li $t8, 100
-    div $t7, $t8            # Divide MMSS por 100
+    div $t7, $t8
     mflo $t8                # Minutos
     mfhi $t9                # Segundos
 
-    # Imprimir formato HH:MM:SS com zeros à esquerda
-    move $a0, $t6           # Hora
+    # Imprimir HH:MM:SS
+    move $a0, $t6
     jal print_dois_digitos
 
     li $v0, 4
-    la $a0, msg_dois_pontos # ":"
+    la $a0, msg_dois_pontos
     syscall
 
-    move $a0, $t8           # Minutos
+    move $a0, $t8
     jal print_dois_digitos
 
     li $v0, 4
-    la $a0, msg_dois_pontos # ":"
+    la $a0, msg_dois_pontos
     syscall
 
-    move $a0, $t9           # Segundos
+    move $a0, $t9
     jal print_dois_digitos
 
     li $v0, 4
     la $a0, newline
     syscall
+
+    # *** CORREÇÃO: JUMP EXPLÍCITO ***
+    j credito_extrato_proxima
 
 credito_extrato_proxima:
     addi $s1, $s1, 1
@@ -760,7 +776,6 @@ credito_extrato_falha_cliente:
     syscall
 
 credito_extrato_fim:
-    # Nova linha final
     li $v0, 4
     la $a0, newline
     syscall
@@ -788,6 +803,8 @@ handle_pagar_fatura:
     sw $t0, 4($sp)          # temporário
     sw $t1, 0($sp)          # temporário
 
+    jal calcular_juros_automatico # calcular juros
+    
     # 1. Parsear CONTA
     la $a0, buffer_temp
     li $a1, '-'
@@ -925,6 +942,8 @@ handle_transferir_credito:
     sw $s2, 8($sp)          # $s2 = valor da transferência
     sw $s3, 4($sp)          # $s3 = data
     sw $s4, 0($sp)          # $s4 = hora
+
+    jal calcular_juros_automatico # calcular juros
 
     # 1. Parsear CONTA_DESTINO
     la $a0, buffer_temp
@@ -1277,102 +1296,244 @@ validar_hora_falso:
     li $v0, 0
     jr $ra
 
-##### FUNCAO Obter Data e Hora Atual #####
-# Usa syscall 30 para incrementar automaticamente
+##### FUNCAO Obter Data e Hora Atual - VERSÃO MELHORADA #####
+# Incrementa tempo proporcionalmente aos milissegundos reais decorridos
 # Saída: $v0 = data, $v1 = hora
 obter_data_hora_atual:
-    addi $sp, $sp, -8
-    sw $s0, 4($sp)
-    sw $ra, 0($sp)
+    addi $sp, $sp, -28
+    sw $ra, 24($sp)
+    sw $s0, 20($sp)
+    sw $s1, 16($sp)
+    sw $s2, 12($sp)
+    sw $s3, 8($sp)
+    sw $s4, 4($sp)
+    sw $s5, 0($sp)
 
     # Carregar tempo_ultimo_incremento
     la $t0, tempo_ultimo_incremento
     lw $s0, 0($t0)
 
     # Se tempo_ultimo_incremento for 0, data/hora não foi configurada
-    beqz $s0, data_hora_nao_configurada
+    beqz $s0, data_hora_nao_configurada_v2
 
     # Obter tempo atual
     li $v0, 30
     syscall
-    move $t1, $a0
+    move $t1, $a0           # $t1 = tempo atual em ms
 
-    # Calcular diferença
-    sub $t2, $t1, $s0
-    li $t3, 1000            # 1000ms = 1 segundo
-    blt $t2, $t3, obter_data_hora_fim  # Se < 1s, não incrementa
+    # Calcular diferença em milissegundos
+    sub $s1, $t1, $s0       # $s1 = ms decorridos
+
+    # Se diferença < 1000ms (1 segundo), não atualiza
+    li $t2, 1000
+    blt $s1, $t2, obter_data_hora_fim_v2
 
     # Atualizar tempo_ultimo_incremento
     sw $t1, 0($t0)
 
-    # Incrementar segundos
+    # Calcular quantos segundos se passaram
+    div $s1, $t2            # $s1 / 1000
+    mflo $s2                # $s2 = segundos inteiros decorridos
+    
+    # Se nenhum segundo completo passou, não atualiza
+    beqz $s2, obter_data_hora_fim_v2
+
+    # Carregar hora atual
     la $t0, hora_atual
-    lw $t4, 0($t0)
+    lw $s3, 0($t0)          # $s3 = HHMMSS
+
+    # Extrair componentes da hora
+    li $t3, 10000
+    div $s3, $t3
+    mflo $s4                # $s4 = HH (horas)
+    mfhi $t4                # $t4 = MMSS
+
+    li $t3, 100
+    div $t4, $t3
+    mflo $s5                # $s5 = MM (minutos)
+    mfhi $t5                # $t5 = SS (segundos)
+
+    # Adicionar segundos decorridos
+    add $t5, $t5, $s2       # SS = SS + segundos_decorridos
+
+    # Propagar carry para minutos
+incrementar_minutos_v2:
+    li $t6, 60
+    blt $t5, $t6, incrementar_horas_v2
     
-    # Extrair componentes
-    li $t5, 100
-    div $t4, $t5
-    mfhi $t6                # SS
-    mflo $t7                # HHMM
+    sub $t5, $t5, $t6       # SS -= 60
+    addi $s5, $s5, 1        # MM += 1
+    j incrementar_minutos_v2
+
+incrementar_horas_v2:
+    # Propagar carry para horas
+    li $t6, 60
+    blt $s5, $t6, incrementar_dias_v2
     
-    div $t7, $t5
-    mfhi $t8                # MM
-    mflo $t9                # HH
+    sub $s5, $s5, $t6       # MM -= 60
+    addi $s4, $s4, 1        # HH += 1
+    j incrementar_horas_v2
 
-    addi $t6, $t6, 1        # SS + 1
-
-    # Verificar overflow de segundos
-    li $t5, 60
-    blt $t6, $t5, atualizar_hora
-    li $t6, 0               # SS = 0
-    addi $t8, $t8, 1        # MM + 1
-
-    # Verificar overflow de minutos
-    blt $t8, $t5, atualizar_hora
-    li $t8, 0               # MM = 0
-    addi $t9, $t9, 1        # HH + 1
-
-    # Verificar overflow de horas
-    li $t5, 24
-    blt $t9, $t5, atualizar_hora
-    li $t9, 0               # HH = 0
+incrementar_dias_v2:
+    # Propagar carry para dias
+    li $t6, 24
+    blt $s4, $t6, salvar_hora_v2
     
-    # Incrementar dia (simplificado - não verifica meses)
-    # Para fins acadêmicos, vamos apenas incrementar o dia
-    # (uma implementação completa seria muito extensa)
+    # Passou da meia-noite - incrementar dia
+    sub $s4, $s4, $t6       # HH -= 24
+    
+    # Incrementar data
     la $t0, data_atual
-    lw $t4, 0($t0)
-    addi $t4, $t4, 1        # Incrementa dia (pode gerar data inválida)
-    sw $t4, 0($t0)
+    lw $t7, 0($t0)
+    move $a0, $t7
+    jal incrementar_data    # Função auxiliar
+    sw $v0, 0($t0)
+    
+    j incrementar_dias_v2
 
-atualizar_hora:
+salvar_hora_v2:
     # Reconstruir hora no formato HHMMSS
-    li $t5, 100
-    mul $t4, $t9, $t5       # HH * 100
-    add $t4, $t4, $t8       # HHMM
-    mul $t4, $t4, $t5       # HHMM * 100
-    add $t4, $t4, $t6       # HHMMSS
+    li $t3, 100
+    mul $t4, $s4, $t3       # HH * 100
+    add $t4, $t4, $s5       # HHMM
+    mul $t4, $t4, $t3       # HHMM * 100
+    add $t4, $t4, $t5       # HHMMSS
     
     la $t0, hora_atual
     sw $t4, 0($t0)
 
-obter_data_hora_fim:
-    # Retornar data e hora
+obter_data_hora_fim_v2:
+    # Retornar data e hora atualizadas
     la $t0, data_atual
     lw $v0, 0($t0)
     la $t0, hora_atual
     lw $v1, 0($t0)
 
-    lw $ra, 0($sp)
-    lw $s0, 4($sp)
-    addi $sp, $sp, 8
+    lw $s5, 0($sp)
+    lw $s4, 4($sp)
+    lw $s3, 8($sp)
+    lw $s2, 12($sp)
+    lw $s1, 16($sp)
+    lw $s0, 20($sp)
+    lw $ra, 24($sp)
+    addi $sp, $sp, 28
     jr $ra
 
-data_hora_nao_configurada:
+data_hora_nao_configurada_v2:
     li $v0, 0
     li $v1, 0
-    j obter_data_hora_fim
+    j obter_data_hora_fim_v2
 
+##### FUNCAO AUXILIAR: Incrementar Data #####
+# Entrada: $a0 = data no formato DDMMAAAA
+# Saída: $v0 = data incrementada (próximo dia)
+# Considera corretamente meses de 28, 29, 30 e 31 dias
+##### FUNCAO AUXILIAR: Incrementar Data - CORRIGIDO #####
+incrementar_data:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $t7, 8($sp)      # MUDADO: $s0 -> $t7
+    sw $t8, 4($sp)      # MUDADO: $s1 -> $t8
+    sw $t9, 0($sp)      # MUDADO: $s2 -> $t9
+
+    # Extrair componentes (DDMMAAAA)
+    li $t0, 1000000
+    div $a0, $t0
+    mflo $t7            # MUDADO: $s0 -> $t7 (dia)
+    mfhi $t1
+
+    li $t0, 10000
+    div $t1, $t0
+    mflo $t8            # MUDADO: $s1 -> $t8 (mês)
+    mfhi $t9            # MUDADO: $s2 -> $t9 (ano)
+
+    # Incrementar dia
+    addi $t7, $t7, 1
+
+    # Verificar limites do mês
+    move $a0, $t8       # MUDADO: $s1 -> $t8
+    move $a1, $t9       # MUDADO: $s2 -> $t9
+    jal obter_dias_mes
+    move $t3, $v0
+
+    # Se dia <= dias_do_mês, OK
+    ble $t7, $t3, reconstruir_data
+
+    # Passou do último dia - ir para próximo mês
+    li $t7, 1
+    addi $t8, $t8, 1
+
+    # Se mês > 12, ir para próximo ano
+    li $t4, 12
+    ble $t8, $t4, reconstruir_data
+
+    li $t8, 1
+    addi $t9, $t9, 1
+
+reconstruir_data:
+    # Reconstruir data: DDMMAAAA
+    li $t0, 10000
+    mul $v0, $t8, $t0   # MUDADO: $s1 -> $t8
+    add $v0, $v0, $t9   # MUDADO: $s2 -> $t9
+    li $t0, 1000000
+    mul $t1, $t7, $t0   # MUDADO: $s0 -> $t7
+    add $v0, $t1, $v0
+
+    lw $t9, 0($sp)      # MUDADO
+    lw $t8, 4($sp)      # MUDADO
+    lw $t7, 8($sp)      # MUDADO
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr $ra
+
+##### FUNCAO AUXILIAR: Obter Dias do Mês #####
+# Entrada: $a0 = mês (1-12), $a1 = ano
+# Saída: $v0 = número de dias do mês
+obter_dias_mes:
+    # Meses com 31 dias: 1, 3, 5, 7, 8, 10, 12
+    beq $a0, 1, dias_31
+    beq $a0, 3, dias_31
+    beq $a0, 5, dias_31
+    beq $a0, 7, dias_31
+    beq $a0, 8, dias_31
+    beq $a0, 10, dias_31
+    beq $a0, 12, dias_31
+
+    # Fevereiro (mês 2)
+    beq $a0, 2, verificar_bissexto
+
+    # Demais meses têm 30 dias
+    li $v0, 30
+    jr $ra
+
+dias_31:
+    li $v0, 31
+    jr $ra
+
+verificar_bissexto:
+    # Ano bissexto: divisível por 4 E (não divisível por 100 OU divisível por 400)
+    li $t0, 4
+    div $a1, $t0
+    mfhi $t1
+    bnez $t1, fev_28        # Não é divisível por 4
+
+    li $t0, 100
+    div $a1, $t0
+    mfhi $t1
+    bnez $t1, fev_29        # Divisível por 4, não por 100 = bissexto
+
+    li $t0, 400
+    div $a1, $t0
+    mfhi $t1
+    beqz $t1, fev_29        # Divisível por 400 = bissexto
+
+fev_28:
+    li $v0, 28
+    jr $ra
+
+fev_29:
+    li $v0, 29
+    jr $ra
 
 
 handle_conta_format:
@@ -1479,7 +1640,7 @@ handle_conta_buscar:
     sw $ra, 0($sp)
     sw $s0, 4($sp) # Salvar $s0 (ponteiro do cliente)
 
-    # $s1 jï¿½ contï¿½m o ponteiro para os argumentos (a conta XXXXXX-X)
+    jal calcular_juros_automatico # calcular juros
 
     # 1. Copiar o argumento (conta) para um buffer temporï¿½rio
     la $a0, buffer_temp # Destino
@@ -1733,6 +1894,8 @@ handle_depositar:
     sw $s1, 8($sp)          # Salva $s1 - será usado para valor do depósito (offset 4)
     sw $s2, 4($sp)          # Salva $s2 - será usado para ponteiro dos argumentos (offset 0)
     sw $s3, 0($sp)	    # $s3 - timestamp
+   
+    jal calcular_juros_automatico # calcular juros
 
     # CRÍTICO: Preserva o ponteiro dos argumentos vindos do main
     # $s1 chega aqui apontando para "CONTA-VALOR" (ex: "123456X-50000")
@@ -1824,6 +1987,8 @@ handle_sacar:
     sw $s1, 8($sp)          # Salva $s1 - será usado para valor do saque
     sw $s2, 4($sp)          # Salva $s2 - será usado para ponteiro dos argumentos
     sw $s3, 0($sp)          # Salva $s3 - timestamp
+    
+    jal calcular_juros_automatico # calcular juros
     
     # $s1 chega aqui apontando para "CONTA-VALOR" (ex: "123456X-20000")
     move $s2, $s1           # Copia para $s2 antes de qualquer operação
@@ -1930,6 +2095,9 @@ handle_transferir_debito:
     sw $s2, 8($sp)
     sw $s3, 4($sp)          # NOVO: para data
     sw $s4, 0($sp)          # NOVO: para hora
+
+
+    jal calcular_juros_automatico # calcular juros
 
     # 1. Parsear CONTA_ORIGEM
     la $a0, buffer_temp     
@@ -2047,44 +2215,46 @@ transferir_fim:
 # Sa?da: $v0 = timestamp combinado (AAAAMMDDHHMMSS)
 
     
-# Funcao Handler para debito_extrato
+# FUNCAO Handler para debito_extrato
 handle_debito_extrato:
-    addi $sp, $sp, -20      # Aloca 20 bytes na pilha
-    sw $ra, 16($sp)         # Salva o endereco de retorno ($ra)
-    sw $s0, 12($sp)         # Salva $s0 (para o ponteiro do cliente)
-    sw $s1, 8($sp)          # Salva $s1 (para o contador 'i' do loop)
-    sw $s2, 4($sp)          # Salva $s2 (para o limite do loop)
-    sw $s3, 0($sp)          # Salva $s3 (para o ponteiro da string da conta)
+    addi $sp, $sp, -20
+    sw $ra, 16($sp)
+    sw $s0, 12($sp)
+    sw $s1, 8($sp)
+    sw $s2, 4($sp)
+    sw $s3, 0($sp)
 
-    # 1. Parsear CONTA (unico argumento)
-    la $a0, buffer_temp     # $a0 (destino) = buffer_temp
-    li $a1, '-'             # $a1 (delimitador)
-    move $a2, $s1           # $a2 (fonte) = $s1 vindo do main (com "CONTA")
-    jal parse_campo         # Extrai a conta
+    jal calcular_juros_automatico
+
+    # 1. Parsear CONTA
+    la $a0, buffer_temp
+    li $a1, '-'
+    move $a2, $s1
+    jal parse_campo
 
     # 2. Buscar cliente
-    la $a0, buffer_temp     # Passa a string da conta
+    la $a0, buffer_temp
     jal buscar_cliente_por_conta_completa
-    beqz $v0, extrato_falha_cliente # Se $v0 for 0, pula para falha
-    move $s0, $v0           # Salva o ponteiro do cliente em $s0
+    beqz $v0, extrato_falha_cliente
+    move $s0, $v0
 
     # 3. Imprimir Cabecalho do Extrato
     li $v0, 4
-    la $a0, msg_extrato_cabecalho # Imprime "Extrato da conta "
+    la $a0, msg_extrato_cabecalho
     syscall
-    la $a0, buffer_temp     # Imprime a conta (XXXXXX-X) que o usuario digitou
+    la $a0, buffer_temp
     syscall
-    la $a0, newline         # Imprime uma nova linha
+    la $a0, newline
     syscall
 
     # 4. Preparar o Loop
-    la $s3, 12($s0)         # $s3 = ponteiro para a string da conta do cliente
-    li $s1, 0               # $s1 = i = 0
+    la $s3, 12($s0)
+    li $s1, 0
     la $t0, num_transacoes_debito
-    lw $s2, 0($t0)          # $s2 = limite (numero total de transacoes registradas)
+    lw $s2, 0($t0)
 
 extrato_loop:
-    bge $s1, $s2, extrato_fim_loop # Se (i >= limite), termina o loop
+    bge $s1, $s2, extrato_fim_loop
 
     # Calcula endereco da transacao[i] (24 bytes cada)
     li $t0, 24
@@ -2093,35 +2263,34 @@ extrato_loop:
     add $t2, $t2, $t1
 
     # 6. Comparar a conta da transacao[i] com a conta do cliente
-    move $a0, $s3           # $a0 = conta do cliente (de $s3)
-    move $a1, $t2           # $a1 = conta da transacao (Offset 0 do slot $t2)
-    jal strcmp              # Compara as duas strings
+    move $a0, $s3
+    move $a1, $t2
+    jal strcmp
 
-    bnez $v0, extrato_proxima_transacao # Se $v0 != 0, pula esta transacao
+    bnez $v0, extrato_proxima_transacao
 
     # 7. CONTAS IGUAIS: Imprimir os dados da transacao
-    # Imprimir TIPO
-    lw $t3, 12($t2)         # Carrega o Tipo da transacao
-    beq $t3, 1, extrato_tipo1 # Se tipo 1, pula para imprimir "Deposito"
-    beq $t3, 2, extrato_tipo2 # Se tipo 2, pula para imprimir "Saque"
-    beq $t3, 3, extrato_tipo3 # Se tipo 3, pula para imprimir "Transferencia"
-    j extrato_imprimir_valor # Pula se for um tipo desconhecido (ou 0)
+    lw $t3, 12($t2)
+    beq $t3, 1, extrato_tipo1
+    beq $t3, 2, extrato_tipo2
+    beq $t3, 3, extrato_tipo3
+    j extrato_imprimir_valor
 
 extrato_tipo1:
     li $v0, 4
-    la $a0, msg_extrato_tipo1 # Imprime "Tipo: Deposito"
+    la $a0, msg_extrato_tipo1
     syscall
     j extrato_imprimir_valor
 
 extrato_tipo2:
     li $v0, 4
-    la $a0, msg_extrato_tipo2 # Imprime "Tipo: Saque"
+    la $a0, msg_extrato_tipo2
     syscall
     j extrato_imprimir_valor
 
 extrato_tipo3:
     li $v0, 4
-    la $a0, msg_extrato_tipo3 # Imprime "Tipo: Transferencia"
+    la $a0, msg_extrato_tipo3
     syscall
 
 extrato_imprimir_valor:
@@ -2130,119 +2299,111 @@ extrato_imprimir_valor:
     la $a0, msg_extrato_valor
     syscall
 
-    lw $a0, 8($t2)          # Carrega o Valor
+    lw $a0, 8($t2)
     jal print_moeda
 
-# === CORREÇÃO DA EXIBIÇÃO DE DATA E HORA ===
-li $v0, 4
-la $a0, msg_data_hora_prefix
-syscall
-
-lw $t5, 16($t2)         # Data (AAAAMMDD) - Ex: 20251111
-lw $t6, 20($t2)         # Hora (HHMMSS)   - Ex: 173000
-
-# ========== EXTRAIR E IMPRIMIR DATA (DD/MM/AAAA) ==========
-# Data está em $t5 como DDMMAAAA (ex: 11112025)
-# Extrair DD (dia)
-li $t7, 1000000
-div $t5, $t7
-mflo $t4                # Dia = DD
-mfhi $t8                # Resto = MMAAAA
-
-# Extrair MM (mes) e AAAA (ano) do resto
-li $t7, 10000
-div $t8, $t7
-mflo $t3                # Mes = MM
-mfhi $t9                # Ano = AAAA
-
-# Imprimir formato DD/MM/AAAA
-li $v0, 1
-move $a0, $t4           # Dia
-syscall
-
-li $v0, 4
-la $a0, msg_barra_data  # "/"
-syscall
-
-li $v0, 1
-move $a0, $t3           # Mes
-syscall
-
-li $v0, 4
-la $a0, msg_barra_data  # "/"
-syscall
-
-li $v0, 1
-move $a0, $t9           # Ano
-syscall
-
-# Espaco antes da hora
-li $v0, 4
-la $a0, msg_espaco
-syscall
-
-# ========== EXTRAIR E IMPRIMIR HORA (HH:MM:SS) ==========
-# Extrair HH (hora)
-li $t7, 10000
-div $t6, $t7            # Divide HHMMSS por 10000
-mflo $t6                # Hora
-mfhi $t7                # Resto = MMSS
-
-# Extrair MM (minutos) e SS (segundos)
-li $t8, 100
-div $t7, $t8            # Divide MMSS por 100
-mflo $t8                # Minutos
-mfhi $t9                # Segundos
-
-# Imprimir formato HH:MM:SS
-move $a0, $t6           # Hora
-jal print_dois_digitos
-
-li $v0, 4
-la $a0, msg_dois_pontos # ":"
-syscall
-
-move $a0, $t8           # Minutos
-jal print_dois_digitos
-
-li $v0, 4
-la $a0, msg_dois_pontos # ":"
-syscall
-
-move $a0, $t9           # Segundos
-jal print_dois_digitos
-
-# Nova linha
-li $v0, 4
-la $a0, newline
-syscall
-
-j extrato_proxima_transacao
-    
-extrato_proxima_transacao:
-    addi $s1, $s1, 1        # i++ (incrementa o contador do loop)
-    j extrato_loop          # Volta ao inicio do loop
-
-extrato_falha_cliente:
+    # Imprimir Data/Hora
     li $v0, 4
-    la $a0, msg_cliente_inexistente # Imprime "Falha: cliente inexistente\n"
+    la $a0, msg_data_hora_prefix
     syscall
-    # (O fluxo continua para 'extrato_fim_loop' logo abaixo)
 
-extrato_fim_loop:
-    # Imprime um newline extra para formatacao
+    lw $t5, 16($t2)         # Data (DDMMAAAA)
+    lw $t6, 20($t2)         # Hora (HHMMSS)
+
+    # Extrair DD/MM/AAAA
+    li $t7, 1000000
+    div $t5, $t7
+    mflo $t4                # Dia
+    mfhi $t8                # Resto MMAAAA
+
+    li $t7, 10000
+    div $t8, $t7
+    mflo $t3                # Mes
+    mfhi $t9                # Ano
+
+    # Imprimir DD/MM/AAAA
+    li $v0, 1
+    move $a0, $t4
+    syscall
+
+    li $v0, 4
+    la $a0, msg_barra_data
+    syscall
+
+    li $v0, 1
+    move $a0, $t3
+    syscall
+
+    li $v0, 4
+    la $a0, msg_barra_data
+    syscall
+
+    li $v0, 1
+    move $a0, $t9
+    syscall
+
+    # Espaco antes da hora
+    li $v0, 4
+    la $a0, msg_espaco
+    syscall
+
+    # Extrair HH:MM:SS
+    li $t7, 10000
+    div $t6, $t7
+    mflo $t6                # Hora
+    mfhi $t7                # Resto MMSS
+
+    li $t8, 100
+    div $t7, $t8
+    mflo $t8                # Minutos
+    mfhi $t9                # Segundos
+
+    # Imprimir HH:MM:SS
+    move $a0, $t6
+    jal print_dois_digitos
+
+    li $v0, 4
+    la $a0, msg_dois_pontos
+    syscall
+
+    move $a0, $t8
+    jal print_dois_digitos
+
+    li $v0, 4
+    la $a0, msg_dois_pontos
+    syscall
+
+    move $a0, $t9
+    jal print_dois_digitos
+
     li $v0, 4
     la $a0, newline
     syscall
 
-    # Restaurar a pilha
+    # *** CORREÇÃO: JUMP EXPLÍCITO ***
+    j extrato_proxima_transacao
+    
+extrato_proxima_transacao:
+    addi $s1, $s1, 1
+    j extrato_loop
+
+extrato_falha_cliente:
+    li $v0, 4
+    la $a0, msg_cliente_inexistente
+    syscall
+
+extrato_fim_loop:
+    li $v0, 4
+    la $a0, newline
+    syscall
+
     lw $s3, 0($sp)
     lw $s2, 4($sp)
     lw $s1, 8($sp)
     lw $s0, 12($sp)
     lw $ra, 16($sp)
-    addi $sp, $sp, 20       # Libera os 20 bytes alocados
-    j cli_loop              # Retorna ao loop principal
+    addi $sp, $sp, 20
+    j cli_loop
     
 # FUNCAO logica_cadastro_cliente
 # Esta funï¿½ï¿½o assume que buffer_cpf, buffer_conta, e buffer_nome
@@ -4004,5 +4165,498 @@ escrever_campo_inteiro:
     jr $ra
     
     
+
+    
 string_para_inteiro:
     j atoi
+    
+    
+    
+    
+    
+##### FUNCAO: Calcular e Aplicar Juros Automaticamente (VERSÃO POR MINUTO) #####
+# Lógica: Aplica juros de 1% UMA VEZ por MINUTO, 
+# na primeira vez que uma função consulta o cliente naquele minuto.
+calcular_juros_automatico:
+    addi $sp, $sp, -36      # 9 registradores
+    sw $ra, 32($sp)
+    sw $s0, 28($sp)
+    sw $s1, 24($sp)
+    sw $s2, 20($sp)
+    sw $s3, 16($sp)
+    sw $s4, 12($sp)
+    sw $s5, 8($sp)
+    sw $s6, 4($sp)
+    sw $s7, 0($sp)
+
+    # Obter timestamp atual (AAAAMMDDHHMMSS)
+    jal obter_timestamp_atual
+    move $s3, $v0
+    beqz $s3, fim_calcular_juros # Sair se data/hora não configurada
+
+    # Iterar clientes
+    la $t0, num_clientes
+    lw $s1, 0($t0)
+    li $s0, 0
+
+loop_juros_clientes:
+    bge $s0, $s1, fim_calcular_juros
+
+    # Endereço do cliente
+    li $t0, 128
+    mul $t1, $s0, $t0
+    la $t2, clientes
+    add $s2, $t2, $t1
+
+    # Verificar ativo
+    lw $t3, 84($s2)
+    beqz $t3, proximo_cliente_juros
+
+    # Carregar crédito usado
+    lw $s7, 80($s2)      
+    blez $s7, proximo_cliente_juros # Sair se não há dívida
+
+    # Buscar última aplicação
+    la $a0, 12($s2)
+    jal buscar_ultimo_juros
+    move $s4, $v0                   # $s4 = last_timestamp (AAAAMMDDHHMMSS)
+
+    # Primeira vez?
+    beqz $s4, inicializar_juros
+
+    # --- LÓGICA POR MINUTO ---
+    # Extrair Data+Hora+Minuto (AAAAMMDDHHMM) de ambos os timestamps
+    
+    # *** ESTA É A ÚNICA LINHA ALTERADA ***
+    li $t0, 100                     # Era 1000000 (para data), agora 100 (para minuto)
+    # *************************************
+    
+    div $s4, $t0                    # $s4 = last_timestamp
+    mflo $t1                        # $t1 = last_date_and_minute (AAAAMMDDHHMM)
+    
+    div $s3, $t0                    # $s3 = current_timestamp
+    mflo $t2                        # $t2 = current_date_and_minute (AAAAMMDDHHMM)
+
+    # Se a data E MINUTO forem OS MESMOS, não aplicar juros
+    beq $t1, $t2, proximo_cliente_juros
+
+    # Se o minuto for DIFERENTE, aplicar juros (1 aplicação)
+    
+    # Calcular 1%
+    li $t0, 100
+    div $s7, $t0
+    mflo $s6                        # juros = credito_usado / 100
+    
+    beqz $s6, juros_minimo_diario
+    j aplicar_juros_diario
+
+juros_minimo_diario:
+    li $s6, 1                       # Mínimo de 1 centavo
+    
+aplicar_juros_diario:
+    # Salvar estado
+    addi $sp, $sp, -12
+    sw $s2, 8($sp)                  # ponteiro cliente
+    sw $s6, 4($sp)                  # valor juros
+    sw $s3, 0($sp)                  # timestamp atual
+
+    # Verificar limite
+    lw $t5, 80($s2)                 # crédito usado atual
+    lw $t8, 76($s2)                 # limite de crédito
+    beq $t5, $t8, pular_aplicacao_diario # Já está no limite
+
+    # Aplicar juros
+    add $t5, $t5, $s6
+    
+    # Garantir que não ultrapassa o limite
+    ble $t5, $t8, salvar_novo_credito_diario
+    move $t5, $t8                   # Se ultrapassar, truncar no limite
+
+salvar_novo_credito_diario:
+    sw $t5, 80($s2)
+
+    # Extrair data/hora (do timestamp ATUAL)
+    lw $s3, 0($sp)
+    move $a0, $s3
+    jal extrair_data_timestamp
+    move $t3, $v0                   # $t3 = AAAAMMDD (atual)
+
+    # *** CORREÇÃO (BUG 3): Converter para DDMMAAAA ***
+    move $a0, $t3
+    jal convert_aaaammdd_to_ddmmaaaa
+    move $t3, $v0                   # $t3 agora é DDMMAAAA
+
+    move $a0, $s3
+    jal extrair_hora_timestamp
+    move $t4, $v0                   # $t4 = HHMMSS (atual)
+
+    # Registrar transação
+    lw $s2, 8($sp)
+    la $a0, 12($s2)                 # Conta
+    lw $s6, 4($sp)
+    move $a1, $s6                   # *** CORREÇÃO (BUG 1): Passar $a1 (valor) ***
+    li $a2, 6                       # Tipo 6 = Juros
+    move $a3, $t3                   # Data (DDMMAAAA)
+    
+    addi $sp, $sp, -4
+    sw $t4, 0($sp)                  # Hora na pilha
+    jal registrar_transacao_credito
+    addi $sp, $sp, 4
+
+pular_aplicacao_diario:
+    lw $s3, 0($sp)                  # Restaurar $s3 (timestamp atual)
+    addi $sp, $sp, 12
+
+    # Atualizar timestamp
+    la $a0, 12($s2)
+    move $a1, $s3                   # $s3 = timestamp ATUAL
+    jal atualizar_ultimo_juros
+    
+    j proximo_cliente_juros
+
+inicializar_juros:
+    # Primeira vez - inicializar com timestamp atual
+    la $a0, 12($s2)
+    move $a1, $s3
+    jal atualizar_ultimo_juros
+
+proximo_cliente_juros:
+    addi $s0, $s0, 1
+    j loop_juros_clientes
+
+fim_calcular_juros:
+    lw $s7, 0($sp)
+    lw $s6, 4($sp)
+    lw $s5, 8($sp)
+    lw $s4, 12($sp)
+    lw $s3, 16($sp)
+    lw $s2, 20($sp)
+    lw $s1, 24($sp)
+    lw $s0, 28($sp)
+    lw $ra, 32($sp)
+    addi $sp, $sp, 36
+    jr $ra
+
+##### FUNCAO: Obter Timestamp Atual #####
+obter_timestamp_atual:
+    addi $sp, $sp, -8
+    sw $ra, 4($sp)
+    sw $s0, 0($sp)
+
+    jal obter_data_hora_atual
+    move $t0, $v0        # Data (DDMMAAAA)
+    move $t1, $v1        # Hora (HHMMSS)
+
+    beqz $t0, timestamp_nao_config
+    beqz $t1, timestamp_nao_config
+
+    # Converter DDMMAAAA para AAAAMMDD
+    li $t2, 1000000
+    div $t0, $t2
+    mflo $t3             # DD
+    mfhi $t4             # MMAAAA
+
+    li $t2, 10000
+    div $t4, $t2
+    mflo $t5             # MM
+    mfhi $t6             # AAAA
+
+    li $t2, 10000
+    mul $t7, $t6, $t2
+    li $t2, 100
+    mul $t8, $t5, $t2
+    add $t7, $t7, $t8
+    add $t7, $t7, $t3    # AAAAMMDD
+
+    # Combinar com hora
+    li $t2, 1000000
+    mul $v0, $t7, $t2
+    add $v0, $v0, $t1    # AAAAMMDDHHMMSS
+
+    j fim_timestamp
+
+timestamp_nao_config:
+    li $v0, 0
+
+fim_timestamp:
+    lw $s0, 0($sp)
+    lw $ra, 4($sp)
+    addi $sp, $sp, 8
+    jr $ra
+
+##### FUNCAO: Buscar Último Timestamp de Juros #####
+# Entrada: $a0 = conta do cliente (string)
+# Saída: $v0 = timestamp (0 se não encontrado)
+buscar_ultimo_juros:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $s0, 8($sp)
+    sw $s1, 4($sp)
+    sw $s2, 0($sp)
+
+    move $s0, $a0        # conta
+    li $s1, 0            # índice
+
+    la $t0, num_clientes
+    lw $s2, 0($t0)       # total clientes
+
+buscar_juros_loop:
+    bge $s1, $s2, buscar_juros_nao_encontrado
+
+    # Calcular offset
+    li $t0, 12
+    mul $t1, $s1, $t0
+    la $t2, ultimo_calculo_juros
+    add $t2, $t2, $t1
+
+    # Comparar conta
+    move $a0, $s0
+    move $a1, $t2
+    jal strcmp
+    beqz $v0, buscar_juros_encontrado
+
+    addi $s1, $s1, 1
+    j buscar_juros_loop
+
+buscar_juros_encontrado:
+    lw $v0, 8($t2)       # timestamp no offset 8
+    j fim_buscar_juros
+
+buscar_juros_nao_encontrado:
+    li $v0, 0
+
+fim_buscar_juros:
+    lw $s2, 0($sp)
+    lw $s1, 4($sp)
+    lw $s0, 8($sp)
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr $ra
+
+##### FUNCAO: Atualizar Último Timestamp de Juros #####
+# Entrada: $a0 = conta, $a1 = novo timestamp
+atualizar_ultimo_juros:
+    addi $sp, $sp, -16
+    sw $ra, 12($sp)
+    sw $s0, 8($sp)
+    sw $s1, 4($sp)
+    sw $s2, 0($sp)
+
+    move $s0, $a0        # conta
+    move $s1, $a1        # timestamp
+    li $s2, 0            # índice
+
+    la $t0, num_clientes
+    lw $t1, 0($t0)
+
+atualizar_juros_loop:
+    bge $s2, $t1, atualizar_juros_novo
+
+    li $t2, 12
+    mul $t3, $s2, $t2
+    la $t4, ultimo_calculo_juros
+    add $t4, $t4, $t3
+
+    # Comparar conta
+    move $a0, $s0
+    move $a1, $t4
+    jal strcmp
+    beqz $v0, atualizar_juros_existente
+
+    addi $s2, $s2, 1
+    j atualizar_juros_loop
+
+atualizar_juros_existente:
+    sw $s1, 8($t4)       # Atualizar timestamp
+    j fim_atualizar_juros
+
+atualizar_juros_novo:
+    # Criar nova entrada
+    li $t2, 12
+    mul $t3, $s2, $t2
+    la $t4, ultimo_calculo_juros
+    add $t4, $t4, $t3
+
+    # Copiar conta
+    move $a0, $t4
+    move $a1, $s0
+    jal strcpy
+
+    # Salvar timestamp
+    sw $s1, 8($t4)
+
+fim_atualizar_juros:
+    lw $s2, 0($sp)
+    lw $s1, 4($sp)
+    lw $s0, 8($sp)
+    lw $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr $ra
+
+##### FUNCAO: Calcular Diferença em Segundos entre Timestamps #####
+# Entrada: $a0 = timestamp anterior, $a1 = timestamp atual
+# Saída: $v0 = diferença em segundos (aproximada)
+calcular_diferenca_segundos:
+    # ===== CORREÇÃO: SALVAR $ra NA PILHA =====
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    # ========================================
+
+    # Simplificação: extrair apenas hora de ambos e calcular diferença
+    # Formato: MMDDHHMMSS
+    
+    # Extrair HHMMSS do timestamp anterior
+    li $t0, 1000000
+    div $a0, $t0
+    mfhi $t1             # HHMMSS anterior
+
+    # Extrair HHMMSS do timestamp atual
+    div $a1, $t0
+    mfhi $t2             # HHMMSS atual
+
+    # Converter HHMMSS para segundos totais
+    move $a0, $t1
+    jal hhmmss_para_segundos
+    move $t3, $v0        # segundos do anterior
+
+    move $a0, $t2
+    jal hhmmss_para_segundos
+    move $t4, $v0        # segundos do atual
+
+    # Diferença
+    sub $v0, $t4, $t3
+    
+    # Se negativo, passou da meia-noite (adicionar 86400)
+    bgez $v0, fim_diff_segundos
+    li $t5, 86400
+    add $v0, $v0, $t5
+
+fim_diff_segundos:
+    # ===== CORREÇÃO: RESTAURAR $ra DA PILHA =====
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    # ==========================================
+    jr $ra
+
+
+
+
+
+##### FUNCAO: Extrair Data de Timestamp #####
+extrair_data_timestamp:
+    # timestamp AAAAMMDDHHMMSS -> AAAAMMDD
+    li $t0, 1000000
+    div $a0, $t0
+    mflo $v0             # AAAAMMDD
+    jr $ra
+
+##### FUNCAO: Extrair Hora de Timestamp #####
+extrair_hora_timestamp:
+    # timestamp AAAAMMDDHHMMSS -> HHMMSS
+    li $t0, 1000000
+    div $a0, $t0
+    mfhi $v0             # HHMMSS
+    jr $ra
+
+##### FUNCAO: Converter HHMMSS para Segundos #####
+hhmmss_para_segundos:
+    li $t0, 10000
+    div $a0, $t0
+    mflo $t1
+    mfhi $t2
+
+    li $t0, 100
+    div $t2, $t0
+    mflo $t3
+    mfhi $t4
+
+    li $t0, 3600
+    mul $t5, $t1, $t0
+    li $t0, 60
+    mul $t6, $t3, $t0
+    add $t5, $t5, $t6
+    add $v0, $t5, $t4
+    jr $ra
+
+##### FUNCAO: Adicionar Segundos a Timestamp #####
+adicionar_segundos_timestamp:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+
+    # Extrai MMDD e HHMMSS
+    li $t0, 1000000
+    div $a0, $t0
+    mflo $t1
+    mfhi $t2
+
+    # Converte hora para segundos
+    move $a0, $t2
+    jal hhmmss_para_segundos
+    move $t5, $v0
+
+    # Adiciona segundos
+    add $v0, $t5, $a1
+
+    # Normaliza
+    li $t6, 86400
+    blt $v0, $t6, reconstruir
+    sub $v0, $v0, $t6
+    addi $t1, $t1, 1
+
+reconstruir:
+    # Converte de volta para HHMMSS
+    move $a0, $v0
+    jal segundos_para_hhmmss
+    move $t2, $v0
+
+    # Reconstrói timestamp
+    mul $v0, $t1, $t0
+    add $v0, $v0, $t2
+
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+##### FUNCAO: Converter Segundos para HHMMSS #####
+segundos_para_hhmmss:
+    li $t0, 3600
+    div $a0, $t0
+    mflo $t1
+    mfhi $t2
+
+    li $t0, 60
+    div $t2, $t0
+    mflo $t3
+    mfhi $t4
+
+    li $t0, 10000
+    mul $v0, $t1, $t0
+    li $t0, 100
+    mul $t5, $t3, $t0
+    add $v0, $v0, $t5
+    add $v0, $v0, $t4
+    jr $ra
+    
+    ##### NOVA FUNCAO: Converter AAAAMMDD para DDMMAAAA #####
+# Entrada: $a0 = data no formato AAAAMMDD
+# Saída: $v0 = data no formato DDMMAAAA
+convert_aaaammdd_to_ddmmaaaa:
+    # $a0 = AAAAMMDD
+    li $t0, 10000
+    div $a0, $t0
+    mflo $t1        # AAAA
+    mfhi $t2        # MMDD
+    
+    li $t0, 100
+    div $t2, $t0
+    mflo $t3        # MM
+    mfhi $t4        # DD
+    
+    # Reconstruir como DDMMAAAA
+    li $t0, 1000000
+    mul $v0, $t4, $t0 # DD * 1_000_000
+    li $t0, 10000
+    mul $t5, $t3, $t0 # MM * 10_000
+    add $v0, $v0, $t5
+    add $v0, $v0, $t1 # DDMMAAAA
+    jr $ra
