@@ -1,0 +1,43 @@
+#  questao 3 strcmp
+#  comparo str1 com str2 e deixo resultado em $v0
+
+.data
+str1:   .asciiz "ABC"
+str2:   .asciiz "ABD"
+
+.text
+.globl main
+main:
+        la   $a0, str1
+        la   $a1, str2
+        jal  strcmp          # $v0 = resultado
+
+        #deve ficar negativo (C < D)
+loop:   j loop
+
+# lógica básica
+# $a0 = str1, $a1 = str2
+# $v0 < 0  -> str1 < str2
+# $v0 = 0  -> iguais
+# $v0 > 0  -> str1 > str2
+strcmp:
+        move $t0, $a0        # ponteiro str1
+        move $t1, $a1        # ponteiro str2
+
+cmp_loop:
+        lb   $t2, 0($t0)     # byte de str1
+        lb   $t3, 0($t1)     # byte de str2
+        beqz $t2, cmp_check  # alguma string acabou?
+        beqz $t3, cmp_check
+        beq  $t2, $t3, cmp_next   # bytes iguais, continua
+        sub  $v0, $t2, $t3   # diferenca ASCII
+        jr   $ra
+
+cmp_next:                      # anda ambos ponteiros
+        addi $t0, $t0, 1
+        addi $t1, $t1, 1
+        j    cmp_loop
+
+cmp_check:                     # resolve último byte
+        sub  $v0, $t2, $t3
+        jr   $ra
