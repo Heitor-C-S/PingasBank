@@ -1,0 +1,49 @@
+#  questao 4 strncmp
+#  comparo só os N primeiros caracteres
+
+.data
+str1:   .asciiz "ABC"
+str2:   .asciiz "ABD"
+n:      .word 2               # N = 2
+
+.text
+.globl main
+main:
+        la   $a0, str1
+        la   $a1, str2
+        lw   $a3, n
+        jal  strncmp          # $v0 = resultado
+
+        #deve dar zero (AB == AB)
+loop:   j loop
+
+#strncmp
+# $a0 = str1, $a1 = str2, $a3 = num
+strncmp:
+        move $t0, $a0        # ponteiro str1
+        move $t1, $a1        # ponteiro str2
+        move $t2, $a3        # contador N
+
+ncmp_loop:
+        beqz $t2, ncmp_equal  # já comparei N bytes
+        lb   $t3, 0($t0)      # byte str1
+        lb   $t4, 0($t1)      # byte str2
+        beqz $t3, ncmp_check  # alguma string acabou?
+        beqz $t4, ncmp_check
+        beq  $t3, $t4, ncmp_next   # iguais, segue
+        sub  $v0, $t3, $t4    # diferenca
+        jr   $ra
+
+ncmp_next:                     # avança e decrementa N
+        addi $t0, $t0, 1
+        addi $t1, $t1, 1
+        addi $t2, $t2, -1
+        j    ncmp_loop
+
+ncmp_check:
+        sub  $v0, $t3, $t4
+        jr   $ra
+
+ncmp_equal:                    # chegou a N: iguais
+        li   $v0, 0
+        jr   $ra

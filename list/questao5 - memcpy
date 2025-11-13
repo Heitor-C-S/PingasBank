@@ -1,0 +1,38 @@
+#  questao 5 memcpy
+#  copio N bytes crus de src para dst (sem olhar \0)
+
+.data
+src:    .byte 0x11, 0x22, 0x33, 0x44
+n:      .word 4
+dst:    .space 8
+
+.text
+.globl main
+main:
+        la   $a0, dst         # destino
+        la   $a1, src         # origem
+        lw   $a2, n           # 4 bytes
+        jal  memcpy
+
+        #dst deve ter 11 22 33 44
+loop:   j loop
+
+# memcpy
+# $a0 = dest, $a1 = src, $a2 = num
+memcpy:
+        move $t0, $a0         # ponteiro dest
+        move $t1, $a1         # ponteiro src
+        move $t2, $a2         # contador
+
+mem_loop:
+        beqz $t2, mem_end     # terminou?
+        lb   $t3, 0($t1)      # pega byte
+        sb   $t3, 0($t0)      # joga no dest
+        addi $t0, $t0, 1      # avança dest
+        addi $t1, $t1, 1      # avança src
+        addi $t2, $t2, -1     # decrementa N
+        j    mem_loop
+
+mem_end:
+        move $v0, $a0         # devolve ponteiro inicial
+        jr   $ra

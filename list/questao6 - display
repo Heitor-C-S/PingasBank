@@ -1,0 +1,30 @@
+.data
+.text          
+.globl main
+
+main:
+    li $t0, 0xffff0000      # endereço do receptor (teclado)
+    li $t1, 0xffff0004      # end. dos dados do teclado
+    li $t2, 0xffff0008      # end. do transmissor (display)
+    li $t3, 0xffff000c      # end. dos dados do display
+
+echo_loop:
+    # espera um caracter ficar disponível no teclado
+wait_keyboard:
+    lw $t4, 0($t0)          # lê o status do teclado
+    andi $t5, $t4, 0x1      # verifica se bit 0 tá setado (ready)
+    beq $t5, $zero, wait_keyboard
+
+    # lê o caractere do teclado
+    lw $t6, 0($t1)          # lê o caractere digitado (8 bits)
+
+    # espera até que o display esteja pronto
+wait_display:
+    lw $t7, 0($t2)          # lê o status do display
+    andi $t8, $t7, 0x1      # verifica se bit 0 está setado (ready)
+    beq $t8, $zero, wait_display
+
+    # escreve o caractere no display
+    sw $t6, 0($t3)          # envia o caractere para o display
+
+    j echo_loop             # repete o processo

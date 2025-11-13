@@ -1,0 +1,59 @@
+#  questao 2 strcat
+#  gruda str2 no fim do que já existe em buf
+
+.data
+str1:   .asciiz "ABC"
+str2:   .asciiz "XYZ"
+buf:    .space 32
+
+.text
+.globl main
+main:
+        la   $a0, buf
+        la   $a1, str1
+        jal  strcpy          # buf = "ABC"  
+
+        la   $a1, str2
+        jal  strcat          # gruda "XYZ" → buf vira "ABCXYZ"
+
+        #aqui para e buf deve ter ABCXYZ
+loop:   j loop
+
+
+# só copiei da questão 1 pra facilitar minha vida ~ass gustavo
+strcpy:
+        move $t0, $a0
+        move $t1, $a1
+cpy_loop:
+        lb   $t2, 0($t1)     # pega byte da origem
+        sb   $t2, 0($t0)     # joga no destino
+        beqz $t2, cpy_end    # encontrou \0, acabou
+        addi $t0, $t0, 1
+        addi $t1, $t1, 1
+        j    cpy_loop
+cpy_end:
+        move $v0, $a0
+        jr   $ra
+
+# strcat
+# $a0 = destino COM string, $a1 = string a anexar
+strcat:
+        move $t0, $a0        # $t0 aponta para o fim do destino
+
+cat_find_end:
+        lb   $t2, 0($t0)
+        beqz $t2, cat_copy   # achou \0, pode colar
+        addi $t0, $t0, 1
+        j    cat_find_end
+
+cat_copy:                      # cópia byte-a-byte de str2
+        lb   $t2, 0($t1)     # byte de str2
+        sb   $t2, 0($t0)     # coloca no fim do dest
+        beqz $t2, cat_end    # terminou str2?
+        addi $t0, $t0, 1
+        addi $t1, $t1, 1
+        j    cat_copy
+
+cat_end:
+        move $v0, $a0        # devolve ponteiro inicial (buf)
+        jr   $ra
