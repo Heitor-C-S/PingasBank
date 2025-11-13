@@ -120,7 +120,7 @@
     msg_dois_pontos: .asciiz ":"
 
     ##### Menu Principal - CLI #####
-    prompt_cli: .asciiz "\nPingasBank> "
+    prompt_cli: .asciiz "\nPingasBank-shell>> "
     goodbye: .asciiz "\nEncerrando o programa, ate mais!\n"
 
 # ===== COMANDOS E TEMPO (.data) =====
